@@ -3,7 +3,7 @@
 ## Reproduce grokking
 
 ```bash
-python idiots/experiments/grokking.py
+python idiots/experiments/grokking/main.py
 ```
 
 See logs with

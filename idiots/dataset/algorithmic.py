@@ -12,16 +12,26 @@ OPERATIONS = {
         "fn": lambda x, y: (x * pow(y, 95, 97)) % 97,
         "n_classes": 97,
     },
+    "x / y (mod 47)": {
+        "fn": lambda x, y: (x * pow(y, 45, 47)) % 47,
+        "n_classes": 47,
+    },
+    "x + y (mod 47)": {
+        "fn": lambda x, y: (x + y) % 47,
+        "n_classes": 47,
+    },
 }
 
 
-def binary_op_loaders(op: str, batch_size: int, train_percentage: float):
+def binary_op_loaders(
+    op: str, train_batch_size: int, test_batch_size: int, train_percentage: float
+):
     dataset = BinaryOp(op)
     train_size = int(len(dataset) * train_percentage)
     test_size = len(dataset) - train_size
     train_dataset, test_dataset = random_split(dataset, [train_size, test_size])
-    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
-    test_loader = DataLoader(test_dataset, batch_size=batch_size)
+    train_loader = DataLoader(train_dataset, batch_size=train_batch_size, shuffle=True)
+    test_loader = DataLoader(test_dataset, batch_size=test_batch_size)
     return dataset, train_loader, test_loader
 
 
@@ -40,8 +50,8 @@ class BinaryOp(TensorDataset):
         x, y = [], []
         for a, b in product(range(self.n_classes), repeat=2):
             result = self.op(a, b)
-            x.append([a, self.OP, b, self.EQ, result])
-            y.append([self.IG, self.IG, self.IG, result, self.IG])
+            x.append([a, self.OP, b, self.EQ])
+            y.append(result)
         x, y = torch.tensor(x), torch.tensor(y)
         super().__init__(x.to("cuda"), y.to("cuda"))
 
