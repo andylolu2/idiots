@@ -50,7 +50,11 @@ def binary_op_splits(op: str = "x + y (mod 97)", train_percentage: float = 0.5):
 
 class DataLoader:
     def __init__(
-        self, ds: Dataset, batch_size: int, infinite: bool = False, shuffle: bool = True
+        self,
+        ds: Dataset,
+        batch_size: int,
+        infinite: bool = False,
+        shuffle: bool = False,
     ):
         self.ds = ds
         self.batch_size = batch_size

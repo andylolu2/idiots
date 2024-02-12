@@ -1,6 +1,8 @@
 import jax
 import jax.numpy as jnp
+import neural_tangents as nt
 import optax
+from einops import rearrange
 from flax.training import train_state
 from tensorboardX import SummaryWriter
 
@@ -14,7 +16,8 @@ eval_every: int = 1000
 warmup_steps: int = 10
 train_batch_size: int = 256
 test_batch_size: int = 256
-train_percentage: float = 0.3
+dots_sample_size: int = 64
+train_percentage: float = 0.4
 weight_decay: float = 0.1
 steps: int = int(1e5)
 
@@ -23,22 +26,33 @@ class TrainState(train_state.TrainState):
     ...
 
 
+@jax.jit
+def dots(state: TrainState, x):
+    kernel_fn = nt.empirical_kernel_fn(
+        state.apply_fn,
+        trace_axes=(),
+        vmap_axes=0,
+        implementation=nt.NtkImplementation.STRUCTURED_DERIVATIVES,
+    )
+    k = kernel_fn(x, None, "ntk", state.params)
+    k = rearrange(k, "b1 b2 d1 d2 -> (b1 d1) (b2 d2)")
+    return jnp.linalg.matrix_rank(k)
+
+
 def init():
     rng = jax.random.PRNGKey(0)
     writer = SummaryWriter(log_dir=str(next_dir("logs/grokking")))
 
     ds_train, ds_test = binary_op_splits(task, train_percentage)
-    train_loader = DataLoader(ds_train, train_batch_size, infinite=True)
-    test_loader = DataLoader(ds_test, test_batch_size, shuffle=False)
 
     model = TransformerSingleOutput(
         d_model=128,
         n_layers=2,
-        n_heads=2,
+        n_heads=4,
         vocab_size=ds_train.features["y"].num_classes,
         max_len=ds_train.features["x"].length,
     )
-    params = model.init(rng, next(iter(train_loader))[1]["x"])
+    params = model.init(rng, ds_train["x"][:1])
     tx = optax.adamw(1e-3, b1=0.9, b2=0.98, weight_decay=weight_decay)
     state = TrainState.create(
         apply_fn=model.apply,
@@ -47,11 +61,11 @@ def init():
     )
 
     print(f"Number of parameters: {num_params(state.params):,}")
-    return state, train_loader, test_loader, writer
+    return state, ds_train, ds_test, writer
 
 
 def main(_):
-    state, train_loader, test_loader, writer = init()
+    state, ds_train, ds_test, writer = init()
 
     @jax.jit
     def train_step(state: TrainState, batch) -> tuple[TrainState, dict]:
@@ -82,7 +96,9 @@ def main(_):
         acc = jnp.argmax(y_pred, axis=-1) == batch["y"]
         return {"eval_loss": loss, "eval_accuracy": acc}
 
-    train_iter = iter(train_loader)
+    train_iter = iter(
+        DataLoader(ds_train, train_batch_size, shuffle=True, infinite=True)
+    )
 
     while state.step < steps:
         state, logs = train_step(state, next(train_iter))
@@ -100,7 +116,7 @@ def main(_):
             )
 
         if state.step % eval_every == 0:
-            for batch in test_loader:
+            for batch in DataLoader(ds_test, test_batch_size):
                 logs = eval_step(state, batch)
                 metrics.log(**logs)
             [losses, accuracies] = metrics.collect("eval_loss", "eval_accuracy")
@@ -108,6 +124,7 @@ def main(_):
                 {
                     "eval/loss": jnp.concatenate(losses).mean().item(),
                     "eval/accuracy": jnp.concatenate(accuracies).mean().item(),
+                    "eval/dots": dots(state, ds_test["x"][:dots_sample_size]).item(),
                 },
                 state.step,
                 writer,
@@ -120,19 +137,6 @@ def main(_):
 #             return step / warmup_steps
 #         case _:
 #             return 1
-
-
-# def dots(f, theta, test_loader, n_batches: int) -> int:
-#     xs = [x for _, (x, _) in take_with_repeat(test_loader, n_batches)]
-#     xs = torch.cat(xs, dim=0)
-
-#     df_dtheta = ft.jacrev(f)
-#     jac = df_dtheta(theta, xs)
-#     jac_flat, _ = tree_flatten(jac)
-#     jac_flat = [j.flatten(end_dim=1).flatten(start_dim=1) for j in jac_flat]
-#     jac_flat = torch.cat(jac_flat, dim=1).float()
-
-#     return torch.linalg.matrix_rank(jac_flat).item()
 
 
 if __name__ == "__main__":
