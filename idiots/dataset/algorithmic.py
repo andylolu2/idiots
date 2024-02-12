@@ -1,7 +1,7 @@
 from itertools import product
+from typing import Any, Iterator
 
-import torch
-from torch.utils.data import DataLoader, TensorDataset, random_split
+from datasets import ClassLabel, Dataset, Features, Sequence
 
 OPERATIONS = {
     "x + y (mod 97)": {
@@ -23,58 +23,51 @@ OPERATIONS = {
 }
 
 
-def binary_op_loaders(
-    op: str, train_batch_size: int, test_batch_size: int, train_percentage: float
-):
-    dataset = BinaryOp(op)
-    train_size = int(len(dataset) * train_percentage)
-    test_size = len(dataset) - train_size
-    train_dataset, test_dataset = random_split(dataset, [train_size, test_size])
-    train_loader = DataLoader(train_dataset, batch_size=train_batch_size, shuffle=True)
-    test_loader = DataLoader(test_dataset, batch_size=test_batch_size)
-    return dataset, train_loader, test_loader
+def binary_op_dataset(op: str):
+    fn = OPERATIONS[op]["fn"]
+    n_classes = OPERATIONS[op]["n_classes"]
+    OP, EQ = n_classes, n_classes + 1
+
+    x, y = [], []
+    for a, b in product(range(n_classes), repeat=2):
+        x.append([a, OP, b, EQ])
+        y.append(fn(a, b))
+    class_label = ClassLabel(
+        num_classes=n_classes + 2,
+        names=[str(i) for i in range(n_classes)] + ["?", "="],
+    )
+    return Dataset.from_dict(
+        {"x": x, "y": y},
+        Features({"x": Sequence(class_label, length=4), "y": class_label}),
+    )
 
 
-class BinaryOp(TensorDataset):
-    def __init__(self, op: str = "x + y (mod 97)", ignore_idx: int = -100):
-        self.op = OPERATIONS[op]["fn"]
-        self.n_classes = OPERATIONS[op]["n_classes"]
+def binary_op_splits(op: str = "x + y (mod 97)", train_percentage: float = 0.5):
+    ds = binary_op_dataset(op).with_format("jax")
+    ds_split = ds.train_test_split(train_size=train_percentage, shuffle=True)
+    return ds_split["train"], ds_split["test"]
 
-        self.OP = self.n_classes
-        self.EQ = self.n_classes + 1
-        self.IG = ignore_idx
 
-        self.vocab_size = self.n_classes + 2
-        self.seq_len = 5
+class DataLoader:
+    def __init__(
+        self, ds: Dataset, batch_size: int, infinite: bool = False, shuffle: bool = True
+    ):
+        self.ds = ds
+        self.batch_size = batch_size
+        self.infinite = infinite
+        self.shuffle = shuffle
 
-        x, y = [], []
-        for a, b in product(range(self.n_classes), repeat=2):
-            result = self.op(a, b)
-            x.append([a, self.OP, b, self.EQ])
-            y.append(result)
-        x, y = torch.tensor(x), torch.tensor(y)
-        super().__init__(x.to("cuda"), y.to("cuda"))
-
-    def decode(self, indices: torch.Tensor) -> str:
-        seq = []
-        for idx in indices:
-            match idx:
-                case self.OP:
-                    seq.append("+")
-                case self.EQ:
-                    seq.append("=")
-                case self.IG:
-                    seq.append("[M]")
-                case _:
-                    seq.append(str(idx.item()))
-        return " ".join(seq)
+    def __iter__(self) -> Iterator[Any]:
+        while True:
+            if self.shuffle:
+                self.ds = self.ds.shuffle(load_from_cache_file=False)
+            yield from self.ds.iter(batch_size=self.batch_size)
+            if not self.infinite:
+                break
 
 
 if __name__ == "__main__":
-    import random
-
-    dataset = BinaryOp("x + y (mod 97)")
-
-    for i in random.sample(range(len(dataset)), 10):
-        x, y = dataset[i]
-        print(dataset.decode(x))
+    ds_train, ds_test = binary_op_splits("x + y (mod 47)", 0.3)
+    for item in DataLoader(ds_test, 32):
+        print(item["x"].shape, item["y"].shape)
+        break
