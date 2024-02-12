@@ -1,7 +1,5 @@
 from collections import defaultdict, deque
 
-import torch
-
 
 class _Metrics:
     def __init__(self, max_len: int | None = None):
@@ -9,8 +7,6 @@ class _Metrics:
 
     def log(self, **kwargs):
         for k, v in kwargs.items():
-            if isinstance(v, torch.Tensor):
-                v = v.detach()
             self.history[k].append(v)
 
     def clear(self):

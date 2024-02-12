@@ -1,120 +1,142 @@
-import torch
-import torch.func as ft
-import torch.nn.functional as F
-from lightning.fabric import Fabric
-from lightning.fabric.loggers import TensorBoardLogger
+import jax
+import jax.numpy as jnp
+import neural_tangents as nt
+import optax
+from einops import rearrange
+from flax.training import train_state
+from tensorboardX import SummaryWriter
 
-from idiots.dataset.algorithmic import binary_op_loaders
+from idiots.dataset.algorithmic import DataLoader, binary_op_splits
 from idiots.experiments.grokking.model import TransformerSingleOutput
-from idiots.utils import metrics, take_with_repeat, tree_flatten
+from idiots.utils import log_dict, metrics, next_dir, num_params
 
 task: str = "x + y (mod 47)"
 log_every: int = 100
 eval_every: int = 1000
 warmup_steps: int = 10
-train_batch_size: int = 128
-test_batch_size: int = 16
-train_percentage: float = 0.3
+train_batch_size: int = 256
+test_batch_size: int = 256
+dots_sample_size: int = 64
+train_percentage: float = 0.4
 weight_decay: float = 0.1
 steps: int = int(1e5)
 
 
-def lr_schedule(step: int) -> float:
-    match step:
-        case step if step < warmup_steps:
-            return step / warmup_steps
-        case _:
-            return 1
+class TrainState(train_state.TrainState):
+    ...
 
 
-@torch.no_grad()
-def evaluate(model, test_loader):
-    model.eval()
-    for x, y in test_loader:
-        y_pred = model(x)
-        loss = F.cross_entropy(y_pred, y)
-        acc = torch.argmax(y_pred, dim=-1) == y
-        metrics.log(eval_loss=loss, eval_accuracy=acc)
-    model.train()
+@jax.jit
+def dots(state: TrainState, x):
+    kernel_fn = nt.empirical_kernel_fn(
+        state.apply_fn,
+        trace_axes=(),
+        vmap_axes=0,
+        implementation=nt.NtkImplementation.STRUCTURED_DERIVATIVES,
+    )
+    k = kernel_fn(x, None, "ntk", state.params)
+    k = rearrange(k, "b1 b2 d1 d2 -> (b1 d1) (b2 d2)")
+    return jnp.linalg.matrix_rank(k)
 
 
-def dots(f, theta, test_loader, n_batches: int) -> int:
-    xs = [x for _, (x, _) in take_with_repeat(test_loader, n_batches)]
-    xs = torch.cat(xs, dim=0)
+def init():
+    rng = jax.random.PRNGKey(0)
+    writer = SummaryWriter(log_dir=str(next_dir("logs/grokking")))
 
-    df_dtheta = ft.jacrev(f)
-    jac = df_dtheta(theta, xs)
-    jac_flat, _ = tree_flatten(jac)
-    jac_flat = [j.flatten(end_dim=1).flatten(start_dim=1) for j in jac_flat]
-    jac_flat = torch.cat(jac_flat, dim=1).float()
+    ds_train, ds_test = binary_op_splits(task, train_percentage)
 
-    return torch.linalg.matrix_rank(jac_flat).item()
+    model = TransformerSingleOutput(
+        d_model=128,
+        n_layers=2,
+        n_heads=4,
+        vocab_size=ds_train.features["y"].num_classes,
+        max_len=ds_train.features["x"].length,
+    )
+    params = model.init(rng, ds_train["x"][:1])
+    tx = optax.adamw(1e-3, b1=0.9, b2=0.98, weight_decay=weight_decay)
+    state = TrainState.create(
+        apply_fn=model.apply,
+        params=params,
+        tx=tx,
+    )
+
+    print(f"Number of parameters: {num_params(state.params):,}")
+    return state, ds_train, ds_test, writer
 
 
 def main(_):
-    logger = TensorBoardLogger(root_dir="logs", name="grokking")
-    fabric = Fabric(precision="32-true", loggers=logger)
-    fabric.launch()
+    state, ds_train, ds_test, writer = init()
 
-    dataset, train_loader, test_loader = binary_op_loaders(
-        task, train_batch_size, test_batch_size, train_percentage
+    @jax.jit
+    def train_step(state: TrainState, batch) -> tuple[TrainState, dict]:
+        def forward(params, x, y):
+            y_pred = state.apply_fn(params, x)
+            losses = optax.softmax_cross_entropy_with_integer_labels(y_pred, y)
+            loss = jnp.mean(losses)
+            return loss, (losses, y_pred)
+
+        grads, (losses, y_pred) = jax.grad(forward, has_aux=True)(
+            state.params, batch["x"], batch["y"]
+        )
+        acc = jnp.argmax(y_pred, axis=-1) == batch["y"]
+        updates, new_opt_state = state.tx.update(grads, state.opt_state, state.params)
+        new_params = optax.apply_updates(state.params, updates)
+        new_state = state.replace(
+            step=state.step + 1,
+            params=new_params,
+            opt_state=new_opt_state,
+        )
+        logs = {"loss": losses, "accuracy": acc}
+        return new_state, logs
+
+    @jax.jit
+    def eval_step(state: TrainState, batch) -> dict:
+        y_pred = state.apply_fn(state.params, batch["x"])
+        loss = optax.softmax_cross_entropy_with_integer_labels(y_pred, batch["y"])
+        acc = jnp.argmax(y_pred, axis=-1) == batch["y"]
+        return {"eval_loss": loss, "eval_accuracy": acc}
+
+    train_iter = iter(
+        DataLoader(ds_train, train_batch_size, shuffle=True, infinite=True)
     )
-    train_loader, test_loader = fabric.setup_dataloaders(train_loader, test_loader)
 
-    model = TransformerSingleOutput(
-        num_tokens=dataset.vocab_size,
-        max_seq_len=dataset.seq_len,
-        dim=64,
-        depth=2,
-        heads=2,
-    )
-    optimizer = torch.optim.AdamW(
-        model.parameters(), lr=1e-3, betas=(0.9, 0.98), weight_decay=weight_decay
-    )
-    model, optimizer = fabric.setup(model, optimizer)
-    theta = dict(model.named_parameters())
+    while state.step < steps:
+        state, logs = train_step(state, next(train_iter))
+        metrics.log(**logs)
 
-    def model_f(theta, x):
-        return ft.functional_call(model, theta, x)
-
-    lr_scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_schedule)
-
-    for step, (epoch, (x, y)) in enumerate(
-        take_with_repeat(train_loader, steps), start=0
-    ):
-        y_pred = model(x)
-        loss = F.cross_entropy(y_pred, y)
-        fabric.backward(loss)
-        optimizer.step()
-        lr_scheduler.step()
-        optimizer.zero_grad()
-
-        acc = torch.argmax(y_pred, dim=-1) == y
-        metrics.log(loss=loss, accuracy=acc)
-
-        if step % log_every == 0:
+        if state.step % log_every == 0:
             [losses, accuracies] = metrics.collect("loss", "accuracy")
-            fabric.log_dict(
+            log_dict(
                 {
-                    "train/loss": torch.stack(losses).mean(),
-                    "train/accuracy": torch.cat(accuracies).float().mean(),
-                    "epoch": epoch,
+                    "train/loss": jnp.concatenate(losses).mean().item(),
+                    "train/accuracy": jnp.concatenate(accuracies).mean().item(),
                 },
-                step,
+                state.step,
+                writer,
             )
 
-        if step % eval_every == 0:
-            evaluate(model, test_loader)
+        if state.step % eval_every == 0:
+            for batch in DataLoader(ds_test, test_batch_size):
+                logs = eval_step(state, batch)
+                metrics.log(**logs)
             [losses, accuracies] = metrics.collect("eval_loss", "eval_accuracy")
-            fabric.log_dict(
+            log_dict(
                 {
-                    "eval/loss": torch.stack(losses).mean(),
-                    "eval/accuracy": torch.cat(accuracies).float().mean(),
-                    "eval/dots": dots(model_f, theta, test_loader, 1),
-                    "epoch": epoch,
+                    "eval/loss": jnp.concatenate(losses).mean().item(),
+                    "eval/accuracy": jnp.concatenate(accuracies).mean().item(),
+                    "eval/dots": dots(state, ds_test["x"][:dots_sample_size]).item(),
                 },
-                step,
+                state.step,
+                writer,
             )
+
+
+# def lr_schedule(step: int) -> float:
+#     match step:
+#         case step if step < warmup_steps:
+#             return step / warmup_steps
+#         case _:
+#             return 1
 
 
 if __name__ == "__main__":
