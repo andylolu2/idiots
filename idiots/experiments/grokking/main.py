@@ -1,5 +1,6 @@
+import json
 import random
-from typing import Any
+from functools import partial
 
 import jax
 import jax.numpy as jnp
@@ -15,7 +16,8 @@ from idiots.dataset.algorithmic import DataLoader, binary_op_splits
 from idiots.experiments.grokking.model import TransformerSingleOutput
 from idiots.utils import metrics, next_dir, num_params
 
-_CONFIG = config_flags.DEFINE_config_file("config", short_name="c")
+FLAGS = flags.FLAGS
+config_flags.DEFINE_config_file("config", short_name="c", lock_config=True)
 flags.mark_flags_as_required(["config"])
 
 
@@ -33,11 +35,11 @@ class TrainState(train_state.TrainState):
     ...
 
 
-@jax.jit
-def train_step(state: TrainState, batch) -> tuple[TrainState, dict]:
+@partial(jax.jit, static_argnums=2)
+def train_step(state: TrainState, batch, loss_fn) -> tuple[TrainState, dict]:
     def forward(params, x, y):
         y_pred = state.apply_fn(params, x)
-        losses = optax.softmax_cross_entropy_with_integer_labels(y_pred, y)
+        losses = loss_fn(y_pred, y)
         loss = jnp.mean(losses)
         return loss, (losses, y_pred)
 
@@ -56,12 +58,23 @@ def train_step(state: TrainState, batch) -> tuple[TrainState, dict]:
     return new_state, logs
 
 
-@jax.jit
-def eval_step(state: TrainState, batch) -> dict:
+@partial(jax.jit, static_argnums=2)
+def eval_step(state: TrainState, batch, loss_fn) -> dict:
     y_pred = state.apply_fn(state.params, batch["x"])
-    loss = optax.softmax_cross_entropy_with_integer_labels(y_pred, batch["y"])
+    losses = loss_fn(y_pred, batch["y"])
     acc = jnp.argmax(y_pred, axis=-1) == batch["y"]
-    return {"eval_loss": loss, "eval_accuracy": acc}
+    return {"eval_loss": losses, "eval_accuracy": acc}
+
+
+def loss_fn(y_pred, y, variant="cross_entropy"):
+    if variant == "cross_entropy":
+        return optax.softmax_cross_entropy(y_pred, y)
+    elif variant == "mse":  # zero-mean mse
+        y = jax.nn.one_hot(y, num_classes=y_pred.shape[-1])
+        y = y - jnp.mean(y, axis=-1, keepdims=True)
+        return jnp.mean(jnp.square(y_pred - y), axis=-1)
+    else:
+        raise ValueError(f"Unknown loss variant: {variant}")
 
 
 @jax.jit
@@ -77,9 +90,13 @@ def dots(state: TrainState, x):
     return jnp.linalg.matrix_rank(k)  # type: ignore
 
 
-def init(config: Any):
+def init(config):
     rng = jax.random.PRNGKey(0)
-    writer = SummaryWriter(log_dir=str(next_dir(config.log_dir)))
+    log_dir = next_dir(config.log_dir)
+    writer = SummaryWriter(log_dir=str(log_dir))
+
+    with open(log_dir / "config.yaml", "w") as f:
+        f.write(config.to_yaml())
 
     ds_train, ds_test = binary_op_splits(config.task, config.train_percentage)
 
@@ -111,16 +128,16 @@ def init(config: Any):
 
 
 def main(_):
-    config: Any = _CONFIG.value
+    config = FLAGS.config
     state, ds_train, ds_test, writer = init(config)
-    writer.add_hparams(dict(config), {})
 
     train_iter = iter(
         DataLoader(ds_train, config.train_batch_size, shuffle=True, infinite=True)
     )
+    loss_fn_ = partial(loss_fn, variant=config.loss_variant)
 
     while state.step < config.steps:
-        state, logs = train_step(state, next(train_iter))
+        state, logs = train_step(state, next(train_iter), loss_fn_)
         metrics.log(**logs)
 
         if state.step % config.log_every == 0:
@@ -132,7 +149,7 @@ def main(_):
 
         if state.step % config.eval_every == 0:
             for batch in DataLoader(ds_test, config.test_batch_size):
-                logs = eval_step(state, batch)
+                logs = eval_step(state, batch, loss_fn_)
                 metrics.log(**logs)
             [losses, accuracies] = metrics.collect("eval_loss", "eval_accuracy")
             loss = jnp.concatenate(losses).mean().item()

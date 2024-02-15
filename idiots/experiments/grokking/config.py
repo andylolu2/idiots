@@ -7,6 +7,7 @@ def get_config():
     config.log_dir = "logs/grokking"
 
     config.task = "x / y (mod 97)"
+    config.loss_variant = "mse"
 
     config.steps = int(1e5)
     config.log_every = 100
@@ -26,7 +27,7 @@ def get_config():
 
     config.opt = dict(
         lr=1e-3,
-        weight_decay=0.0,
+        weight_decay=0.01,
         warmup_steps=10,
     )
 
