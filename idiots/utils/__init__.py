@@ -2,7 +2,6 @@ import re
 from pathlib import Path
 
 import jax
-from tensorboardX import SummaryWriter
 
 from .metrics import metrics
 
@@ -21,8 +20,3 @@ def next_dir(path: str | Path, prefix: str = "exp") -> Path:
         if match:
             largest = max(largest, int(match.group(1)))
     return path / f"{prefix}{largest + 1}"
-
-
-def log_dict(d: dict, step: int, writer: SummaryWriter):
-    for k, v in d.items():
-        writer.add_scalar(k, v, step)

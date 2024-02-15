@@ -1,29 +1,67 @@
+import random
+from typing import Any
+
 import jax
 import jax.numpy as jnp
 import neural_tangents as nt
 import optax
+from absl import app, flags, logging
 from einops import rearrange
 from flax.training import train_state
+from ml_collections import config_flags
 from tensorboardX import SummaryWriter
 
 from idiots.dataset.algorithmic import DataLoader, binary_op_splits
 from idiots.experiments.grokking.model import TransformerSingleOutput
-from idiots.utils import log_dict, metrics, next_dir, num_params
+from idiots.utils import metrics, next_dir, num_params
 
-task: str = "x + y (mod 47)"
-log_every: int = 100
-eval_every: int = 1000
-warmup_steps: int = 10
-train_batch_size: int = 256
-test_batch_size: int = 256
-dots_sample_size: int = 64
-train_percentage: float = 0.4
-weight_decay: float = 0.1
-steps: int = int(1e5)
+_CONFIG = config_flags.DEFINE_config_file("config", short_name="c")
+flags.mark_flags_as_required(["config"])
 
 
 class TrainState(train_state.TrainState):
+    """We might want to add some extra fields down the line.
+
+    The base class already has the following fields:
+        step: int
+        apply_fn: Callable
+        params: core.FrozenDict[str, Any]
+        tx: optax.GradientTransformation
+        opt_state: optax.OptState
+    """
+
     ...
+
+
+@jax.jit
+def train_step(state: TrainState, batch) -> tuple[TrainState, dict]:
+    def forward(params, x, y):
+        y_pred = state.apply_fn(params, x)
+        losses = optax.softmax_cross_entropy_with_integer_labels(y_pred, y)
+        loss = jnp.mean(losses)
+        return loss, (losses, y_pred)
+
+    grads, (losses, y_pred) = jax.grad(forward, has_aux=True)(
+        state.params, batch["x"], batch["y"]
+    )
+    acc = jnp.argmax(y_pred, axis=-1) == batch["y"]
+    updates, new_opt_state = state.tx.update(grads, state.opt_state, state.params)
+    new_params = optax.apply_updates(state.params, updates)
+    new_state = state.replace(
+        step=state.step + 1,
+        params=new_params,
+        opt_state=new_opt_state,
+    )
+    logs = {"loss": losses, "accuracy": acc}
+    return new_state, logs
+
+
+@jax.jit
+def eval_step(state: TrainState, batch) -> dict:
+    y_pred = state.apply_fn(state.params, batch["x"])
+    loss = optax.softmax_cross_entropy_with_integer_labels(y_pred, batch["y"])
+    acc = jnp.argmax(y_pred, axis=-1) == batch["y"]
+    return {"eval_loss": loss, "eval_accuracy": acc}
 
 
 @jax.jit
@@ -36,108 +74,82 @@ def dots(state: TrainState, x):
     )
     k = kernel_fn(x, None, "ntk", state.params)
     k = rearrange(k, "b1 b2 d1 d2 -> (b1 d1) (b2 d2)")
-    return jnp.linalg.matrix_rank(k)
+    return jnp.linalg.matrix_rank(k)  # type: ignore
 
 
-def init():
+def init(config: Any):
     rng = jax.random.PRNGKey(0)
-    writer = SummaryWriter(log_dir=str(next_dir("logs/grokking")))
+    writer = SummaryWriter(log_dir=str(next_dir(config.log_dir)))
 
-    ds_train, ds_test = binary_op_splits(task, train_percentage)
+    ds_train, ds_test = binary_op_splits(config.task, config.train_percentage)
 
     model = TransformerSingleOutput(
-        d_model=128,
-        n_layers=2,
-        n_heads=4,
+        d_model=config.model.d_model,
+        n_layers=config.model.n_layers,
+        n_heads=config.model.n_heads,
         vocab_size=ds_train.features["y"].num_classes,
         max_len=ds_train.features["x"].length,
     )
     params = model.init(rng, ds_train["x"][:1])
-    tx = optax.adamw(1e-3, b1=0.9, b2=0.98, weight_decay=weight_decay)
-    state = TrainState.create(
-        apply_fn=model.apply,
-        params=params,
-        tx=tx,
-    )
 
-    print(f"Number of parameters: {num_params(state.params):,}")
+    tx = optax.adamw(
+        learning_rate=optax.join_schedules(
+            [
+                optax.linear_schedule(0, config.opt.lr, config.opt.warmup_steps),
+                optax.constant_schedule(config.opt.lr),
+            ],
+            boundaries=[config.opt.warmup_steps],
+        ),
+        b1=0.9,
+        b2=0.98,
+        weight_decay=config.opt.weight_decay,
+    )
+    state = TrainState.create(apply_fn=model.apply, params=params, tx=tx)
+
+    logging.info("Number of parameters: %d", num_params(params))
     return state, ds_train, ds_test, writer
 
 
 def main(_):
-    state, ds_train, ds_test, writer = init()
-
-    @jax.jit
-    def train_step(state: TrainState, batch) -> tuple[TrainState, dict]:
-        def forward(params, x, y):
-            y_pred = state.apply_fn(params, x)
-            losses = optax.softmax_cross_entropy_with_integer_labels(y_pred, y)
-            loss = jnp.mean(losses)
-            return loss, (losses, y_pred)
-
-        grads, (losses, y_pred) = jax.grad(forward, has_aux=True)(
-            state.params, batch["x"], batch["y"]
-        )
-        acc = jnp.argmax(y_pred, axis=-1) == batch["y"]
-        updates, new_opt_state = state.tx.update(grads, state.opt_state, state.params)
-        new_params = optax.apply_updates(state.params, updates)
-        new_state = state.replace(
-            step=state.step + 1,
-            params=new_params,
-            opt_state=new_opt_state,
-        )
-        logs = {"loss": losses, "accuracy": acc}
-        return new_state, logs
-
-    @jax.jit
-    def eval_step(state: TrainState, batch) -> dict:
-        y_pred = state.apply_fn(state.params, batch["x"])
-        loss = optax.softmax_cross_entropy_with_integer_labels(y_pred, batch["y"])
-        acc = jnp.argmax(y_pred, axis=-1) == batch["y"]
-        return {"eval_loss": loss, "eval_accuracy": acc}
+    config: Any = _CONFIG.value
+    state, ds_train, ds_test, writer = init(config)
+    writer.add_hparams(dict(config), {})
 
     train_iter = iter(
-        DataLoader(ds_train, train_batch_size, shuffle=True, infinite=True)
+        DataLoader(ds_train, config.train_batch_size, shuffle=True, infinite=True)
     )
 
-    while state.step < steps:
+    while state.step < config.steps:
         state, logs = train_step(state, next(train_iter))
         metrics.log(**logs)
 
-        if state.step % log_every == 0:
+        if state.step % config.log_every == 0:
             [losses, accuracies] = metrics.collect("loss", "accuracy")
-            log_dict(
-                {
-                    "train/loss": jnp.concatenate(losses).mean().item(),
-                    "train/accuracy": jnp.concatenate(accuracies).mean().item(),
-                },
-                state.step,
-                writer,
-            )
+            loss = jnp.concatenate(losses).mean().item()
+            acc = jnp.concatenate(accuracies).mean().item()
+            writer.add_scalar("train/loss", loss, state.step)
+            writer.add_scalar("train/accuracy", acc, state.step)
 
-        if state.step % eval_every == 0:
-            for batch in DataLoader(ds_test, test_batch_size):
+        if state.step % config.eval_every == 0:
+            for batch in DataLoader(ds_test, config.test_batch_size):
                 logs = eval_step(state, batch)
                 metrics.log(**logs)
             [losses, accuracies] = metrics.collect("eval_loss", "eval_accuracy")
-            log_dict(
-                {
-                    "eval/loss": jnp.concatenate(losses).mean().item(),
-                    "eval/accuracy": jnp.concatenate(accuracies).mean().item(),
-                    "eval/dots": dots(state, ds_test["x"][:dots_sample_size]).item(),
-                },
-                state.step,
-                writer,
+            loss = jnp.concatenate(losses).mean().item()
+            acc = jnp.concatenate(accuracies).mean().item()
+
+            random_indices = random.sample(
+                range(len(ds_train)), config.dots_sample_size
             )
+            dots_train = dots(state, ds_train.select(random_indices)["x"])
+            random_indices = random.sample(range(len(ds_test)), config.dots_sample_size)
+            dots_val = dots(state, ds_test.select(random_indices)["x"])
 
-
-# def lr_schedule(step: int) -> float:
-#     match step:
-#         case step if step < warmup_steps:
-#             return step / warmup_steps
-#         case _:
-#             return 1
+            writer.add_scalar("eval/loss", loss, state.step)
+            writer.add_scalar("eval/accuracy", acc, state.step)
+            writer.add_scalar("eval/dots", dots_val, state.step)
+            writer.add_scalar("train/dots", dots_train, state.step)
 
 
 if __name__ == "__main__":
-    main(None)
+    app.run(main)

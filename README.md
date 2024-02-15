@@ -3,7 +3,7 @@
 ## Reproduce grokking
 
 ```bash
-python idiots/experiments/grokking/main.py
+python idiots/experiments/grokking/main.py --config idiots/experiments/grokking/config.py
 ```
 
 See logs with
@@ -20,3 +20,7 @@ Developed on Python 3.11 but should work on 3.10+.
 The core dependencies are in `requirements.txt`.
 
 The full list of dependencies is in `requirements-lock.txt`.
+
+```bash
+pip install -r requirements-lock.txt
+```

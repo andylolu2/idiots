@@ -7,3 +7,4 @@ tensorboardx~=2.6.2.2
 tensorboard~=2.15.2
 neural-tangents~=0.6.5
 einops~=0.7.0
+ml_collections==0.1.1
