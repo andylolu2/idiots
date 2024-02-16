@@ -92,12 +92,14 @@ def dots(state: TrainState, x):
 
 
 def init(config):
-    rng = jax.random.PRNGKey(0)
+    rng = jax.random.PRNGKey(config.seed)
     log_dir = next_dir(config.log_dir).absolute().resolve()
     writer = SummaryWriter(log_dir=str(log_dir))
     mmgr = ocp.CheckpointManager(log_dir / "checkpoints", metadata=config.to_dict())
 
-    ds_train, ds_test = binary_op_splits(config.task, config.train_percentage)
+    ds_train, ds_test = binary_op_splits(
+        config.task, config.train_percentage, config.seed
+    )
 
     model = TransformerSingleOutput(
         d_model=config.model.d_model,
@@ -130,9 +132,10 @@ def main(_):
     config = FLAGS.config
     state, ds_train, ds_test, writer, mmgr = init(config)
 
-    train_iter = iter(
-        DataLoader(ds_train, config.train_batch_size, shuffle=True, infinite=True)
+    train_loader = DataLoader(
+        ds_train, config.train_batch_size, shuffle=True, infinite=True, drop_last=True
     )
+    train_iter = iter(train_loader)
 
     while state.step < config.steps:
         state, logs = train_step(state, next(train_iter), config.loss_variant)
@@ -153,17 +156,20 @@ def main(_):
             loss = jnp.concatenate(losses).mean().item()
             acc = jnp.concatenate(accuracies).mean().item()
 
-            random_indices = random.sample(
-                range(len(ds_train)), config.dots_sample_size
-            )
-            dots_train = dots(state, ds_train.select(random_indices)["x"])
-            random_indices = random.sample(range(len(ds_test)), config.dots_sample_size)
-            dots_val = dots(state, ds_test.select(random_indices)["x"])
-
             writer.add_scalar("eval/loss", loss, state.step)
             writer.add_scalar("eval/accuracy", acc, state.step)
-            writer.add_scalar("eval/dots", dots_val, state.step)
-            writer.add_scalar("train/dots", dots_train, state.step)
+
+            if config.dots_sample_size > 0:
+                random_indices = random.sample(
+                    range(len(ds_train)), config.dots_sample_size
+                )
+                dots_train = dots(state, ds_train.select(random_indices)["x"])
+                random_indices = random.sample(
+                    range(len(ds_test)), config.dots_sample_size
+                )
+                dots_val = dots(state, ds_test.select(random_indices)["x"])
+                writer.add_scalar("train/dots", dots_train, state.step)
+                writer.add_scalar("eval/dots", dots_val, state.step)
 
         if state.step % config.save_every == 0 and config.save_every > 0:
             mmgr.save(state.step, args=ocp.args.StandardSave(state))  # type: ignore

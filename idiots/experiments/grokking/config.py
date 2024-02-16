@@ -6,7 +6,8 @@ def get_config():
 
     config.log_dir = "logs/grokking"
 
-    config.task = "x / y (mod 97)"
+    config.seed = 0
+    config.task = "x / y (mod 47)"
     config.loss_variant = "cross_entropy"
 
     config.steps = 100_000
@@ -18,17 +19,17 @@ def get_config():
     config.train_batch_size = 512
     config.test_batch_size = 512
 
-    config.dots_sample_size = 32
+    config.dots_sample_size = 64
 
     config.model = dict(
-        d_model=128,
+        d_model=64,
         n_layers=2,
-        n_heads=4,
+        n_heads=2,
     )
 
     config.opt = dict(
         lr=1e-3,
-        weight_decay=0,
+        weight_decay=0.1,
         warmup_steps=10,
     )
 
