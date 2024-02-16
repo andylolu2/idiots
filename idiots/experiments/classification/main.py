@@ -12,9 +12,9 @@ from flax.training import train_state
 from ml_collections import config_flags
 from tensorboardX import SummaryWriter
 
-from idiots.dataset.algorithmic import binary_op_splits
 from idiots.dataset.dataloader import DataLoader
-from idiots.experiments.grokking.model import TransformerSingleOutput
+from idiots.dataset.image_classification import mnist_splits
+from idiots.experiments.classification.model import ImageMLP
 from idiots.utils import metrics, next_dir, num_params
 
 FLAGS = flags.FLAGS
@@ -97,14 +97,12 @@ def init(config):
     writer = SummaryWriter(log_dir=str(log_dir))
     mmgr = ocp.CheckpointManager(log_dir / "checkpoints", metadata=config.to_dict())
 
-    ds_train, ds_test = binary_op_splits(config.task, config.train_percentage)
+    ds_train, ds_test = mnist_splits()
 
-    model = TransformerSingleOutput(
-        d_model=config.model.d_model,
+    model = ImageMLP(
+        hidden=config.model.d_model,
         n_layers=config.model.n_layers,
-        n_heads=config.model.n_heads,
-        vocab_size=ds_train.features["y"].num_classes,
-        max_len=ds_train.features["x"].length,
+        out=ds_train.features["y"].num_classes,
     )
     params = model.init(rng, ds_train["x"][:1])
 

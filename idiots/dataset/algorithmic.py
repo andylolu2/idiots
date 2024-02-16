@@ -48,12 +48,14 @@ def binary_op_dataset(op: str):
 
 
 def binary_op_splits(op: str = "x + y (mod 97)", train_percentage: float = 0.5):
-    ds = binary_op_dataset(op).with_format("jax")
+    ds = binary_op_dataset(op).with_format("numpy")
     ds_split = ds.train_test_split(train_size=train_percentage, shuffle=True)
     return ds_split["train"], ds_split["test"]
 
 
 if __name__ == "__main__":
+    from time import perf_counter
+
     from idiots.dataset.dataloader import DataLoader
 
     ds_train, ds_test = binary_op_splits("x + y (mod 47)", 0.3)
@@ -62,3 +64,11 @@ if __name__ == "__main__":
         print(item["x"].shape, item["y"].shape)
         print(item["x"].dtype, item["y"].dtype)
         break
+
+    # Performance test
+    start = perf_counter()
+    n_iters = 0
+    for batch in DataLoader(ds_train, 32):
+        n_iters += 1
+    print(f"Time: {perf_counter() - start:.4f} seconds")
+    print(f"Time/step: {(perf_counter() - start) / 100:.4f} seconds")

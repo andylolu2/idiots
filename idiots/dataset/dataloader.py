@@ -20,6 +20,8 @@ class DataLoader:
         while True:
             if self.shuffle:
                 self.ds = self.ds.shuffle(load_from_cache_file=False)
-            yield from self.ds.iter(batch_size=self.batch_size)
+            yield from self.ds.iter(
+                batch_size=self.batch_size, drop_last_batch=True
+            )  # Dropping last batch to avoid JAX re-compilation
             if not self.infinite:
                 break

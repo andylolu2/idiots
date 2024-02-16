@@ -26,3 +26,8 @@ pip install -r requirements.txt
 # or
 pip install -r requirements.lock
 ```
+
+See training logs with
+```bash
+tensorboard --logdir logs
+```

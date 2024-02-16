@@ -12,6 +12,9 @@ def num_params(params):
 
 def next_dir(path: str | Path, prefix: str = "exp") -> Path:
     path = Path(path)
+    if not path.exists():
+        return path / f"{prefix}1"
+
     largest = 0
     for p in path.iterdir():
         if not p.is_dir():
