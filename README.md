@@ -17,10 +17,12 @@ You need to install JAX manually (because the installation steps are different d
 
 Developed on Python 3.11 but should work on 3.10+.
 
-The core dependencies are in `requirements.txt`.
+The core (direct) dependencies are in `requirements.txt`.
 
-The full list of dependencies is in `requirements-lock.txt`.
+The full list of frozen dependencies is in `requirements.lock`.
 
 ```bash
-pip install -r requirements-lock.txt
+pip install -r requirements.txt
+# or
+pip install -r requirements.lock
 ```

@@ -1,4 +1,3 @@
-import json
 import random
 from functools import partial
 
@@ -13,7 +12,8 @@ from flax.training import train_state
 from ml_collections import config_flags
 from tensorboardX import SummaryWriter
 
-from idiots.dataset.algorithmic import DataLoader, binary_op_splits
+from idiots.dataset.algorithmic import binary_op_splits
+from idiots.dataset.dataloader import DataLoader
 from idiots.experiments.grokking.model import TransformerSingleOutput
 from idiots.utils import metrics, next_dir, num_params
 

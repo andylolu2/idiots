@@ -1,5 +1,4 @@
 from itertools import product
-from typing import Any, Iterator
 
 from datasets import ClassLabel, Dataset, Features, Sequence
 
@@ -24,6 +23,12 @@ OPERATIONS = {
 
 
 def binary_op_dataset(op: str):
+    """Binary operation dataset.
+
+    Features:
+        x: (4,) int32, of the form "a ? b ="
+        y: () int32, result of the operation
+    """
     fn = OPERATIONS[op]["fn"]
     n_classes = OPERATIONS[op]["n_classes"]
     OP, EQ = n_classes, n_classes + 1
@@ -48,30 +53,12 @@ def binary_op_splits(op: str = "x + y (mod 97)", train_percentage: float = 0.5):
     return ds_split["train"], ds_split["test"]
 
 
-class DataLoader:
-    def __init__(
-        self,
-        ds: Dataset,
-        batch_size: int,
-        infinite: bool = False,
-        shuffle: bool = False,
-    ):
-        self.ds = ds
-        self.batch_size = batch_size
-        self.infinite = infinite
-        self.shuffle = shuffle
-
-    def __iter__(self) -> Iterator[Any]:
-        while True:
-            if self.shuffle:
-                self.ds = self.ds.shuffle(load_from_cache_file=False)
-            yield from self.ds.iter(batch_size=self.batch_size)
-            if not self.infinite:
-                break
-
-
 if __name__ == "__main__":
+    from idiots.dataset.dataloader import DataLoader
+
     ds_train, ds_test = binary_op_splits("x + y (mod 47)", 0.3)
+    print(ds_train.features)
     for item in DataLoader(ds_test, 32):
         print(item["x"].shape, item["y"].shape)
+        print(item["x"].dtype, item["y"].dtype)
         break
