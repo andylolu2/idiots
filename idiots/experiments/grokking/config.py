@@ -7,11 +7,12 @@ def get_config():
     config.log_dir = "logs/grokking"
 
     config.task = "x / y (mod 97)"
-    config.loss_variant = "mse"
+    config.loss_variant = "cross_entropy"
 
-    config.steps = int(1e5)
+    config.steps = 100_000
     config.log_every = 100
     config.eval_every = 1000
+    config.save_every = 2000
 
     config.train_percentage = 0.5
     config.train_batch_size = 512
@@ -27,7 +28,7 @@ def get_config():
 
     config.opt = dict(
         lr=1e-3,
-        weight_decay=0.01,
+        weight_decay=0,
         warmup_steps=10,
     )
 

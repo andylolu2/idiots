@@ -6,6 +6,7 @@ import jax
 import jax.numpy as jnp
 import neural_tangents as nt
 import optax
+import orbax.checkpoint as ocp
 from absl import app, flags, logging
 from einops import rearrange
 from flax.training import train_state
@@ -68,7 +69,7 @@ def eval_step(state: TrainState, batch, loss_fn) -> dict:
 
 def loss_fn(y_pred, y, variant="cross_entropy"):
     if variant == "cross_entropy":
-        return optax.softmax_cross_entropy(y_pred, y)
+        return optax.softmax_cross_entropy_with_integer_labels(y_pred, y)
     elif variant == "mse":  # zero-mean mse
         y = jax.nn.one_hot(y, num_classes=y_pred.shape[-1])
         y = y - jnp.mean(y, axis=-1, keepdims=True)
@@ -92,11 +93,11 @@ def dots(state: TrainState, x):
 
 def init(config):
     rng = jax.random.PRNGKey(0)
-    log_dir = next_dir(config.log_dir)
+    log_dir = (
+        next_dir(config.log_dir).absolute().resolve()
+    )  # orbax needs absolute paths
     writer = SummaryWriter(log_dir=str(log_dir))
-
-    with open(log_dir / "config.yaml", "w") as f:
-        f.write(config.to_yaml())
+    mmgr = ocp.CheckpointManager(log_dir / "checkpoints", metadata=config.to_dict())
 
     ds_train, ds_test = binary_op_splits(config.task, config.train_percentage)
 
@@ -124,12 +125,12 @@ def init(config):
     state = TrainState.create(apply_fn=model.apply, params=params, tx=tx)
 
     logging.info("Number of parameters: %d", num_params(params))
-    return state, ds_train, ds_test, writer
+    return state, ds_train, ds_test, writer, mmgr
 
 
 def main(_):
     config = FLAGS.config
-    state, ds_train, ds_test, writer = init(config)
+    state, ds_train, ds_test, writer, mmgr = init(config)
 
     train_iter = iter(
         DataLoader(ds_train, config.train_batch_size, shuffle=True, infinite=True)
@@ -166,6 +167,9 @@ def main(_):
             writer.add_scalar("eval/accuracy", acc, state.step)
             writer.add_scalar("eval/dots", dots_val, state.step)
             writer.add_scalar("train/dots", dots_train, state.step)
+
+        if state.step % config.save_every == 0:
+            mmgr.save(state.step, args=ocp.args.StandardSave(state))  # type: ignore
 
 
 if __name__ == "__main__":

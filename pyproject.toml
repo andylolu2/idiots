@@ -1,9 +1,2 @@
-[tool.poetry]
-name = "idiots"
-version = "0.1.0"
-description = ""
-authors = ["andylolu2 <andylolu24@gmail.com>"]
-readme = "README.md"
-
 [tool.isort]
 profile = "black"
