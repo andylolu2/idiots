@@ -11,6 +11,7 @@ ml_collections==0.1.1
 pillow==10.2.0
 matplotlib==3.8.3
 seaborn==0.13.2
+orbax-checkpoint==0.5.3
 ## The following requirements were added by pip freeze:
 absl-py==2.1.0
 aiohttp==3.9.3
@@ -117,7 +118,6 @@ nvidia-nccl-cu12==2.19.3
 nvidia-nvjitlink-cu12==12.3.101
 oauthlib==3.2.2
 opt-einsum==3.3.0
-orbax-checkpoint==0.5.3
 overrides==7.7.0
 packaging==23.2
 pandas==2.2.0
