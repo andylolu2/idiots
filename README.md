@@ -2,32 +2,26 @@
 
 ## Reproduce grokking
 
+Run one of the following scripts to reproduce the checkpoints:
 ```bash
-python idiots/experiments/grokking/main.py --config idiots/experiments/grokking/config.py
+runs/grokking.sh
+runs/grokking_mse.sh
+runs/grokking_s5.sh
 ```
 
-See logs with
+By default, it logs metrics to `<cwd>/logs/grokking`. See logs with
 ```bash
-tensorboard --logdir logs
+tensorboard --logdir logs/grokking
 ```
 
 ## Setup
 
-You need to install JAX manually (because the installation steps are different depending on what accelerator you are using). See https://jax.readthedocs.io/en/latest/installation.htm.
-
 Developed on Python 3.11 but should work on 3.10+.
 
-The core (direct) dependencies are in `requirements.txt`.
+The core (direct) dependencies are in `requirements.in`. The full list of frozen dependencies is in `requirements.txt`.
 
-The full list of frozen dependencies is in `requirements.lock`.
-
-```bash
-pip install -r requirements.txt
-# or
-pip install -r requirements.lock
-```
-
-See training logs with
-```bash
-tensorboard --logdir logs
-```
+> **IMPORTANT**: At the time of this project, there is a **dependency hell** with `tensorflow` and `flax` so the library versions don't resolve correctly. To reproduce the environment, please install from the `requirements.txt` file with
+> ```bash
+> pip install -r requirements.txt --no-deps
+> ```
+> this assumes you are using CUDA.

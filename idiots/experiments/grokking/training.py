@@ -7,7 +7,6 @@ import jax.numpy as jnp
 import neural_tangents as nt
 import optax
 import orbax.checkpoint as ocp
-from absl import logging
 from einops import rearrange
 from flax.training import train_state
 from ml_collections import ConfigDict
@@ -15,7 +14,7 @@ from tensorboardX import SummaryWriter
 
 from idiots.dataset.algorithmic import binary_op_splits
 from idiots.experiments.grokking.model import TransformerSingleOutput
-from idiots.utils import next_dir, num_params
+from idiots.utils import next_dir
 
 
 class TrainState(train_state.TrainState):
@@ -87,16 +86,10 @@ def dots(state: TrainState, x):
     return jnp.linalg.matrix_rank(k)  # type: ignore
 
 
-def init(config):
-    rng = jax.random.PRNGKey(config.seed)
-    log_dir = next_dir(config.log_dir).absolute().resolve()
-    writer = SummaryWriter(log_dir=str(log_dir))
-    mngr = ocp.CheckpointManager(log_dir / "checkpoints", metadata=config.to_dict())
-
+def init_state_ds(config):
     ds_train, ds_test = binary_op_splits(
         config.task, config.train_percentage, config.seed
     )
-
     model = TransformerSingleOutput(
         d_model=config.model.d_model,
         n_layers=config.model.n_layers,
@@ -104,8 +97,7 @@ def init(config):
         vocab_size=ds_train.features["y"].num_classes,
         max_len=ds_train.features["x"].length,
     )
-    params = model.init(rng, ds_train["x"][:1])
-
+    params = model.init(jax.random.PRNGKey(config.seed), ds_train["x"][:1])
     tx = optax.adamw(
         learning_rate=optax.join_schedules(
             [
@@ -119,8 +111,14 @@ def init(config):
         weight_decay=config.opt.weight_decay,
     )
     state = TrainState.create(apply_fn=model.apply, params=params, tx=tx)
+    return state, ds_train, ds_test
 
-    logging.info("Number of parameters: %d", num_params(params))
+
+def init(config):
+    log_dir = next_dir(config.log_dir).absolute().resolve()
+    writer = SummaryWriter(log_dir=str(log_dir))
+    mngr = ocp.CheckpointManager(log_dir / "checkpoints", metadata=config.to_dict())
+    state, ds_train, ds_test = init_state_ds(config)
     return state, ds_train, ds_test, writer, mngr
 
 
@@ -133,34 +131,7 @@ def restore(checkponit_dir: Path, step: int):
         ),
     )
     config: Any = ConfigDict(mngr.metadata())
-
-    ds_train, ds_test = binary_op_splits(
-        config.task, config.train_percentage, config.seed
-    )
-
-    model = TransformerSingleOutput(
-        d_model=config.model.d_model,
-        n_layers=config.model.n_layers,
-        n_heads=config.model.n_heads,
-        vocab_size=ds_train.features["y"].num_classes,
-        max_len=ds_train.features["x"].length,
-    )
-    rng = jax.random.PRNGKey(config.seed)
-    params = model.init(rng, ds_train["x"][:1])
-
-    tx = optax.adamw(
-        learning_rate=optax.join_schedules(
-            [
-                optax.linear_schedule(0, config.opt.lr, config.opt.warmup_steps),
-                optax.constant_schedule(config.opt.lr),
-            ],
-            boundaries=[config.opt.warmup_steps],
-        ),
-        b1=0.9,
-        b2=0.98,
-        weight_decay=config.opt.weight_decay,
-    )
-    state = TrainState.create(apply_fn=model.apply, params=params, tx=tx)
+    state, ds_train, ds_test = init_state_ds(config)
 
     if step > 0:
         state = mngr.restore(step, args=ocp.args.StandardRestore(state))  # type: ignore
