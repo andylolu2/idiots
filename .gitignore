@@ -9,3 +9,6 @@ logs
 
 # vscode
 .vscode
+
+# Python virtual environment 
+/venv
