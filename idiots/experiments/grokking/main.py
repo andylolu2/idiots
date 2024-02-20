@@ -2,12 +2,12 @@ import random
 
 import jax.numpy as jnp
 import orbax.checkpoint as ocp
-from absl import app, flags
+from absl import app, flags, logging
 from ml_collections import config_flags
 
 from idiots.dataset.dataloader import DataLoader
 from idiots.experiments.grokking.training import dots, eval_step, init, train_step
-from idiots.utils import metrics
+from idiots.utils import metrics, num_params
 
 FLAGS = flags.FLAGS
 config_flags.DEFINE_config_file("config", short_name="c", lock_config=True)
@@ -17,6 +17,7 @@ flags.mark_flags_as_required(["config"])
 def main(_):
     config = FLAGS.config
     state, ds_train, ds_test, writer, mngr = init(config)
+    logging.info("Number of parameters: %d", num_params(state.params))
 
     train_loader = DataLoader(
         ds_train, config.train_batch_size, shuffle=True, infinite=True, drop_last=True
