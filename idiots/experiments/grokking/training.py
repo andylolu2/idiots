@@ -72,6 +72,7 @@ def loss_fn(y_pred, y, variant="cross_entropy"):
     else:
         raise ValueError(f"Unknown loss variant: {variant}")
 
+
 # Everything in jax.jit can only be array manipulations.
 @jax.jit
 def dots(state: TrainState, x):
@@ -144,7 +145,9 @@ def restore(checkponit_dir: Path, step: int):
         max_len=ds_train.features["x"].length,
     )
     rng = jax.random.PRNGKey(config.seed)
-    params = model.init(rng, ds_train["x"][:1]) # Model needs example to pass to forward function
+    params = model.init(
+        rng, ds_train["x"][:1]
+    )  # Model needs example to pass to forward function
 
     tx = optax.adamw(
         learning_rate=optax.join_schedules(
