@@ -1,17 +1,30 @@
 import random
+from typing import cast
 
 import jax.numpy as jnp
 import orbax.checkpoint as ocp
 from absl import app, flags, logging
+from datasets import Dataset
 from ml_collections import config_flags
 
 from idiots.dataset.dataloader import DataLoader
-from idiots.experiments.grokking.training import dots, eval_step, init, train_step
+from idiots.experiments.grokking.training import (
+    TrainState,
+    dots,
+    eval_step,
+    init,
+    train_step,
+)
 from idiots.utils import metrics, num_params
 
 FLAGS = flags.FLAGS
 config_flags.DEFINE_config_file("config", short_name="c", lock_config=True)
 flags.mark_flags_as_required(["config"])
+
+
+def compute_dots(state: TrainState, ds: Dataset, sample_size: int) -> int:
+    random_indices = random.sample(range(len(ds)), sample_size)
+    return dots(state.apply_fn, state.params, ds.select(random_indices)["x"])
 
 
 def main(_):
@@ -26,6 +39,7 @@ def main(_):
 
     while state.step < config.steps:
         state, logs = train_step(state, next(train_iter), config.loss_variant)
+        state = cast(TrainState, state)  # For better typing
         metrics.log(**logs)
 
         if state.step % config.log_every == 0 and config.log_every > 0:
@@ -42,19 +56,12 @@ def main(_):
             [losses, accuracies] = metrics.collect("eval_loss", "eval_accuracy")
             loss = jnp.concatenate(losses).mean().item()
             acc = jnp.concatenate(accuracies).mean().item()
-
             writer.add_scalar("eval/loss", loss, state.step)
             writer.add_scalar("eval/accuracy", acc, state.step)
 
             if config.dots_sample_size > 0:
-                random_indices = random.sample(
-                    range(len(ds_train)), config.dots_sample_size
-                )
-                dots_train = dots(state, ds_train.select(random_indices)["x"])
-                random_indices = random.sample(
-                    range(len(ds_test)), config.dots_sample_size
-                )
-                dots_val = dots(state, ds_test.select(random_indices)["x"])
+                dots_train = compute_dots(state, ds_train, config.dots_sample_size)
+                dots_val = compute_dots(state, ds_test, config.dots_sample_size)
                 writer.add_scalar("train/dots", dots_train, state.step)
                 writer.add_scalar("eval/dots", dots_val, state.step)
 
