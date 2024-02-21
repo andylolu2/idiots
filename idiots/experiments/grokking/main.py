@@ -1,5 +1,4 @@
 import random
-from typing import cast
 
 import jax.numpy as jnp
 import orbax.checkpoint as ocp
@@ -39,7 +38,7 @@ def main(_):
 
     while state.step < config.steps:
         state, logs = train_step(state, next(train_iter), config.loss_variant)
-        state = cast(TrainState, state)  # For better typing
+        assert isinstance(state, TrainState)  # For better typing
         metrics.log(**logs)
 
         if state.step % config.log_every == 0 and config.log_every > 0:
