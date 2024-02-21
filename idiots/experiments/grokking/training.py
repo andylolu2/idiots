@@ -7,6 +7,7 @@ import jax.numpy as jnp
 import neural_tangents as nt
 import optax
 import orbax.checkpoint as ocp
+from datasets import Dataset
 from einops import rearrange
 from flax.training import train_state
 from ml_collections import ConfigDict
@@ -125,7 +126,9 @@ def init(config):
     return state, ds_train, ds_test, writer, mngr
 
 
-def restore(checkponit_dir: Path, step: int):
+def restore(
+    checkponit_dir: Path, step: int
+) -> tuple[Any, TrainState, Dataset, Dataset]:
     checkponit_dir = checkponit_dir.absolute().resolve()
     mngr = ocp.CheckpointManager(
         checkponit_dir,
@@ -168,5 +171,6 @@ def restore(checkponit_dir: Path, step: int):
 
     if step > 0:
         state = mngr.restore(step, args=ocp.args.StandardRestore(state))  # type: ignore
+        assert isinstance(state, TrainState)
 
     return config, state, ds_train, ds_test
