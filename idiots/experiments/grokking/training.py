@@ -74,18 +74,12 @@ def loss_fn(y_pred, y, variant="cross_entropy"):
         raise ValueError(f"Unknown loss variant: {variant}")
 
 
-def dots(apply_fn, params, x, batch_size: int = 32):
+def dots(kernel_fn, params, x, batch_size: int = 32):
     """Compute the DOTS (rank of the NTK/Jacobian)
 
     Don't need to jit this as `nt.batch` already jits `inner_ntk`.
     """
-    inner_ntk = nt.empirical_ntk_fn(
-        apply_fn,
-        trace_axes=(),
-        vmap_axes=0,
-        implementation=nt.NtkImplementation.STRUCTURED_DERIVATIVES,
-    )
-    k = nt.batch(inner_ntk, batch_size=batch_size)(x, None, params)
+    k = nt.batch(kernel_fn, batch_size=batch_size)(x, None, params)
     k = rearrange(k, "b1 b2 d1 d2 -> (b1 d1) (b2 d2)")
     return jnp.linalg.matrix_rank(k)  # type: ignore
 

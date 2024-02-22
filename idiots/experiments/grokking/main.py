@@ -1,6 +1,7 @@
 import random
 
 import jax.numpy as jnp
+import neural_tangents as nt
 import orbax.checkpoint as ocp
 from absl import app, flags, logging
 from datasets import Dataset
@@ -21,9 +22,11 @@ config_flags.DEFINE_config_file("config", short_name="c", lock_config=True)
 flags.mark_flags_as_required(["config"])
 
 
-def compute_dots(state: TrainState, ds: Dataset, sample_size: int) -> int:
+def compute_dots(
+    kernel_fn, params, ds: Dataset, sample_size: int, batch_size: int
+) -> int:
     random_indices = random.sample(range(len(ds)), sample_size)
-    return dots(state.apply_fn, state.params, ds.select(random_indices)["x"]).item()
+    return dots(kernel_fn, params, ds.select(random_indices)["x"], batch_size).item()
 
 
 def main(_):
@@ -31,10 +34,15 @@ def main(_):
     state, ds_train, ds_test, writer, mngr = init(config)
     logging.info("Number of parameters: %d", num_params(state.params))
 
-    train_loader = DataLoader(
-        ds_train, config.train_batch_size, shuffle=True, infinite=True, drop_last=True
+    train_iter = iter(
+        DataLoader(ds_train, config.train_batch_size, shuffle=True, infinite=True)
     )
-    train_iter = iter(train_loader)
+    kernel_fn = nt.empirical_ntk_fn(
+        state.apply_fn,
+        trace_axes=(),
+        vmap_axes=0,
+        implementation=nt.NtkImplementation.STRUCTURED_DERIVATIVES,
+    )
 
     while state.step < config.steps:
         state, logs = train_step(state, next(train_iter), config.loss_variant)
@@ -59,8 +67,20 @@ def main(_):
             writer.add_scalar("eval/accuracy", acc, state.step)
 
             if config.dots_sample_size > 0:
-                dots_train = compute_dots(state, ds_train, config.dots_sample_size)
-                dots_val = compute_dots(state, ds_test, config.dots_sample_size)
+                dots_train = compute_dots(
+                    kernel_fn,
+                    state.params,
+                    ds_train,
+                    config.dots_sample_size,
+                    config.dots_batch_size,
+                )
+                dots_val = compute_dots(
+                    kernel_fn,
+                    state.params,
+                    ds_test,
+                    config.dots_sample_size,
+                    config.dots_batch_size,
+                )
                 writer.add_scalar("train/dots", dots_train, state.step)
                 writer.add_scalar("eval/dots", dots_val, state.step)
 

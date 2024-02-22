@@ -2,11 +2,10 @@ import random
 
 import jax
 import jax.numpy as jnp
-import optax
+import neural_tangents as nt
 import orbax.checkpoint as ocp
 from absl import app, flags, logging
 from datasets import Dataset
-from flax.training import train_state
 from ml_collections import config_flags
 from tensorboardX import SummaryWriter
 
@@ -22,12 +21,10 @@ flags.mark_flags_as_required(["config"])
 
 
 def compute_dots(
-    state: TrainState, ds: Dataset, sample_size: int, batch_size: int
+    kernel_fn, params, ds: Dataset, sample_size: int, batch_size: int
 ) -> int:
     random_indices = random.sample(range(len(ds)), sample_size)
-    return dots(
-        state.apply_fn, state.params, ds.select(random_indices)["x"], batch_size
-    ).item()
+    return dots(kernel_fn, params, ds.select(random_indices)["x"], batch_size).item()
 
 
 def init(config):
@@ -57,6 +54,12 @@ def main(_):
     train_iter = iter(
         DataLoader(ds_train, config.train_batch_size, shuffle=True, infinite=True)
     )
+    kernel_fn = nt.empirical_ntk_fn(
+        state.apply_fn,
+        trace_axes=(),
+        vmap_axes=0,
+        implementation=nt.NtkImplementation.STRUCTURED_DERIVATIVES,
+    )
 
     while state.step < config.steps:
         state, logs = train_step(state, next(train_iter), config.loss_variant)
@@ -82,16 +85,25 @@ def main(_):
 
             if config.dots_sample_size > 0:
                 dots_train = compute_dots(
-                    state, ds_train, config.dots_sample_size, config.dots_batch_size
+                    kernel_fn,
+                    state.params,
+                    ds_train,
+                    config.dots_sample_size,
+                    config.dots_batch_size,
                 )
                 dots_val = compute_dots(
-                    state, ds_test, config.dots_sample_size, config.dots_batch_size
+                    kernel_fn,
+                    state.params,
+                    ds_test,
+                    config.dots_sample_size,
+                    config.dots_batch_size,
                 )
                 writer.add_scalar("eval/dots", dots_val, state.step)
                 writer.add_scalar("train/dots", dots_train, state.step)
 
         if state.step % config.save_every == 0 and config.save_every > 0:
             mngr.save(state.step, args=ocp.args.StandardSave(state))  # type: ignore
+            mngr.wait_until_finished()
 
 
 if __name__ == "__main__":
