@@ -120,25 +120,6 @@ def restore(
         ),
     )
     config: Any = ConfigDict(mngr.metadata())
-
-    ds_train, ds_test = binary_op_splits(
-        config.task, config.train_percentage, config.seed
-    )
-
-    model = TransformerSingleOutput(
-        d_model=config.model.d_model,
-        n_layers=config.model.n_layers,
-        n_heads=config.model.n_heads,
-        vocab_size=ds_train.features["y"].num_classes,
-        max_len=ds_train.features["x"].length,
-    )
-    rng = jax.random.PRNGKey(config.seed)
-    params = model.init(
-        rng, ds_train["x"][:1]
-    )  # Model needs example to pass to forward function
-    tx = get_optimizer("adamw", **config.opt)
-
-    state = TrainState.create(apply_fn=model.apply, params=params, tx=tx)
     state, ds_train, ds_test = init_state_and_ds(config)
 
     if step > 0:

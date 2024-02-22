@@ -7,13 +7,11 @@ import orbax.checkpoint as ocp
 from absl import app, flags, logging
 from datasets import Dataset
 from ml_collections import config_flags
-from tensorboardX import SummaryWriter
 
 from idiots.dataset.dataloader import DataLoader
-from idiots.dataset.image_classification import mnist_splits
-from idiots.experiments.classification.model import ImageMLP
+from idiots.experiments.classification.training import init
 from idiots.experiments.grokking.training import TrainState, dots, eval_step, train_step
-from idiots.utils import get_optimizer, metrics, next_dir, num_params
+from idiots.utils import metrics, num_params
 
 FLAGS = flags.FLAGS
 config_flags.DEFINE_config_file("config", short_name="c", lock_config=True)
@@ -27,29 +25,10 @@ def compute_dots(
     return dots(kernel_fn, params, ds.select(random_indices)["x"], batch_size).item()
 
 
-def init(config):
-    rng = jax.random.PRNGKey(0)
-    log_dir = next_dir(config.log_dir).absolute().resolve()
-    writer = SummaryWriter(log_dir=str(log_dir))
-    mngr = ocp.CheckpointManager(log_dir / "checkpoints", metadata=config.to_dict())
-
-    ds_train, ds_test = mnist_splits(config.train_size, config.test_size, config.seed)
-    model = ImageMLP(
-        hidden=config.model.d_model,
-        n_layers=config.model.n_layers,
-        out=ds_train.features["y"].num_classes,
-    )
-    params = model.init(rng, ds_train["x"][:1])
-    tx = get_optimizer(**config.opt)
-    logging.info("Number of parameters: %d", num_params(params))
-
-    state = TrainState.create(apply_fn=model.apply, params=params, tx=tx)
-    return state, ds_train, ds_test, writer, mngr
-
-
 def main(_):
     config = FLAGS.config
     state, ds_train, ds_test, writer, mngr = init(config)
+    logging.info("Number of parameters: %d", num_params(state.params))
 
     train_iter = iter(
         DataLoader(ds_train, config.train_batch_size, shuffle=True, infinite=True)
