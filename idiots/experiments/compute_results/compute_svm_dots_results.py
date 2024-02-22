@@ -55,7 +55,7 @@ for experiment_name, experiment_path in experiments:
 
   # Extract data from checkpoints 
   data = []
-  for step in range(0, 50000, 1000):
+  for step in range(0, 50000, 10000):
     state, ds_train, ds_test, train_loss, train_acc, test_loss, test_acc = eval_checkpoint(step, eval_checkpoint_batch_size)
     data.append(
         {
@@ -96,14 +96,23 @@ for experiment_name, experiment_path in experiments:
   dots_results = []
   computed_kernels = []
 
-  N_train = 512
-  N_test = 512
+  N_train = 5 #512
+  N_test = 5 #512
 
-  X_train = jnp.array(train_data_checkpoints[0]['x'][:N_train])
-  Y_train = jnp.array(train_data_checkpoints[0]['y'][:N_train])
+  X_test_full = jnp.array(test_data_checkpoints[0]['x'][:N_test])
+  Y_test_full = jnp.array(test_data_checkpoints[0]['y'][:N_test])
 
-  X_test = jnp.array(test_data_checkpoints[0]['x'][:N_test])
-  Y_test = jnp.array(test_data_checkpoints[0]['y'][:N_test])
+  X_test_for_svm_training = X_test_full[:len(X_test_full) // 2]
+  Y_test_for_svm_training = Y_test_full[:len(Y_test_full) // 2]
+
+  X_test_for_svm_testing = X_test_full[len(X_test_full) // 2:]
+  Y_test_for_svm_testing = Y_test_full[len(Y_test_full) // 2:]
+
+  # X_train = jnp.array(train_data_checkpoints[0]['x'][:N_train])
+  # Y_train = jnp.array(train_data_checkpoints[0]['y'][:N_train])
+
+  # X_test = jnp.array(test_data_checkpoints[0]['x'][:N_test])
+  # Y_test = jnp.array(test_data_checkpoints[0]['y'][:N_test])
 
   for i in range(len(state_checkpoints)):
 
@@ -120,7 +129,7 @@ for experiment_name, experiment_path in experiments:
                                        implementation=nt.NtkImplementation.STRUCTURED_DERIVATIVES,)
 
     kernel_fn_batched = nt.batch(kernel_fn, device_count=-1, batch_size=32)
-    kernel = kernel_fn_batched(X_test, None, "ntk", state.params)
+    kernel = kernel_fn_batched(X_test_full, None, "ntk", state.params)
 
     computed_kernels.append(kernel.tolist())
     dots_results.append(jnp.linalg.matrix_rank(kernel).item())
@@ -133,10 +142,10 @@ for experiment_name, experiment_path in experiments:
 
     svc = SVC(kernel=custom_kernel)
 
-    svc.fit(X_train, Y_train)
+    svc.fit(X_test_for_svm_training, Y_test_for_svm_training)
 
-    predictions = svc.predict(X_test)
-    accuracy = accuracy_score(Y_test, predictions)
+    predictions = svc.predict(X_test_for_svm_testing)
+    accuracy = accuracy_score(Y_test_for_svm_testing, predictions)
 
     svm_accuracy.append(accuracy)
 
