@@ -5,6 +5,11 @@ import jax.numpy as jnp
 import seaborn as sns
 import pandas as pd
 import matplotlib.pyplot as plt
+import sys
+import subprocess
+
+sys.path.append("/home/dc755/idiots")
+
 
 from idiots.dataset.dataloader import DataLoader
 from idiots.experiments.grokking.training import restore, eval_step
@@ -17,6 +22,10 @@ import json
 import os 
 import warnings
 import gc 
+
+
+
+
 
 os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
 
@@ -44,9 +53,9 @@ def get_dots(kernel_fn, X):
     kernel = kernel_fn_batched(X, None, "ntk", state.params)
     return jnp.linalg.matrix_rank(kernel).item()
 
-experiments = [("div", "../../logs/division/exp21/checkpoints"), ("div_mse", "../../logs/division_mse/exp22/checkpoints"), ("s5", "../../logs/s5/exp24/checkpoints")]
+experiments = [("div", "../idiots/logs/division/exp21/checkpoints"), ("div_mse", "../idiots/logs/division_mse/exp22/checkpoints"), ("s5", "../idiots/logs/s5/exp24/checkpoints")]
 
-for experiment_name, experiment_path in experiments: 
+for experiment_name, experiment_path in experiments[1:]: 
 
   checkpoint_dir = Path(experiment_path)
   batch_size = 512
