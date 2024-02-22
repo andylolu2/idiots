@@ -1,13 +1,11 @@
 import random
-from functools import partial
 
 import jax
 import jax.numpy as jnp
-import neural_tangents as nt
 import optax
 import orbax.checkpoint as ocp
 from absl import app, flags, logging
-from einops import rearrange
+from datasets import Dataset
 from flax.training import train_state
 from ml_collections import config_flags
 from tensorboardX import SummaryWriter
@@ -15,6 +13,7 @@ from tensorboardX import SummaryWriter
 from idiots.dataset.dataloader import DataLoader
 from idiots.dataset.image_classification import mnist_splits
 from idiots.experiments.classification.model import ImageMLP
+from idiots.experiments.grokking.training import dots, eval_step, train_step
 from idiots.utils import metrics, next_dir, num_params
 
 FLAGS = flags.FLAGS
@@ -36,59 +35,13 @@ class TrainState(train_state.TrainState):
     ...
 
 
-@partial(jax.jit, static_argnums=2)
-def train_step(state: TrainState, batch, loss_variant: str) -> tuple[TrainState, dict]:
-    def forward(params, x, y):
-        y_pred = state.apply_fn(params, x)
-        losses = loss_fn(y_pred, y, variant=loss_variant)
-        loss = jnp.mean(losses)
-        return loss, (losses, y_pred)
-
-    grads, (losses, y_pred) = jax.grad(forward, has_aux=True)(
-        state.params, batch["x"], batch["y"]
-    )
-    acc = jnp.argmax(y_pred, axis=-1) == batch["y"]
-    updates, new_opt_state = state.tx.update(grads, state.opt_state, state.params)
-    new_params = optax.apply_updates(state.params, updates)
-    new_state = state.replace(
-        step=state.step + 1,
-        params=new_params,
-        opt_state=new_opt_state,
-    )
-    logs = {"loss": losses, "accuracy": acc}
-    return new_state, logs
-
-
-@partial(jax.jit, static_argnums=2)
-def eval_step(state: TrainState, batch, loss_variant: str) -> dict:
-    y_pred = state.apply_fn(state.params, batch["x"])
-    losses = loss_fn(y_pred, batch["y"], variant=loss_variant)
-    acc = jnp.argmax(y_pred, axis=-1) == batch["y"]
-    return {"eval_loss": losses, "eval_accuracy": acc}
-
-
-def loss_fn(y_pred, y, variant="cross_entropy"):
-    if variant == "cross_entropy":
-        return optax.softmax_cross_entropy_with_integer_labels(y_pred, y)
-    elif variant == "mse":  # zero-mean mse
-        y = jax.nn.one_hot(y, num_classes=y_pred.shape[-1])
-        y = y - jnp.mean(y, axis=-1, keepdims=True)
-        return jnp.mean(jnp.square(y_pred - y), axis=-1)
-    else:
-        raise ValueError(f"Unknown loss variant: {variant}")
-
-
-@jax.jit
-def dots(state: TrainState, x):
-    kernel_fn = nt.empirical_kernel_fn(
-        state.apply_fn,
-        trace_axes=(),
-        vmap_axes=0,
-        implementation=nt.NtkImplementation.STRUCTURED_DERIVATIVES,
-    )
-    k = kernel_fn(x, None, "ntk", state.params)
-    k = rearrange(k, "b1 b2 d1 d2 -> (b1 d1) (b2 d2)")
-    return jnp.linalg.matrix_rank(k)  # type: ignore
+def compute_dots(
+    state: TrainState, ds: Dataset, sample_size: int, batch_size: int
+) -> int:
+    random_indices = random.sample(range(len(ds)), sample_size)
+    return dots(
+        state.apply_fn, state.params, ds.select(random_indices)["x"], batch_size
+    ).item()
 
 
 def init(config):
@@ -97,7 +50,7 @@ def init(config):
     writer = SummaryWriter(log_dir=str(log_dir))
     mmgr = ocp.CheckpointManager(log_dir / "checkpoints", metadata=config.to_dict())
 
-    ds_train, ds_test = mnist_splits()
+    ds_train, ds_test = mnist_splits(config.train_size, config.test_size, config.seed)
 
     model = ImageMLP(
         hidden=config.model.d_model,
@@ -134,6 +87,7 @@ def main(_):
 
     while state.step < config.steps:
         state, logs = train_step(state, next(train_iter), config.loss_variant)
+        assert isinstance(state, TrainState)  # For better typing
         metrics.log(**logs)
 
         if state.step % config.log_every == 0 and config.log_every > 0:
@@ -150,18 +104,18 @@ def main(_):
             [losses, accuracies] = metrics.collect("eval_loss", "eval_accuracy")
             loss = jnp.concatenate(losses).mean().item()
             acc = jnp.concatenate(accuracies).mean().item()
-
-            random_indices = random.sample(
-                range(len(ds_train)), config.dots_sample_size
-            )
-            dots_train = dots(state, ds_train.select(random_indices)["x"])
-            random_indices = random.sample(range(len(ds_test)), config.dots_sample_size)
-            dots_val = dots(state, ds_test.select(random_indices)["x"])
-
             writer.add_scalar("eval/loss", loss, state.step)
             writer.add_scalar("eval/accuracy", acc, state.step)
-            writer.add_scalar("eval/dots", dots_val, state.step)
-            writer.add_scalar("train/dots", dots_train, state.step)
+
+            if config.dots_sample_size > 0:
+                dots_train = compute_dots(
+                    state, ds_train, config.dots_sample_size, config.dots_batch_size
+                )
+                dots_val = compute_dots(
+                    state, ds_test, config.dots_sample_size, config.dots_batch_size
+                )
+                writer.add_scalar("eval/dots", dots_val, state.step)
+                writer.add_scalar("train/dots", dots_train, state.step)
 
         if state.step % config.save_every == 0 and config.save_every > 0:
             mmgr.save(state.step, args=ocp.args.StandardSave(state))  # type: ignore

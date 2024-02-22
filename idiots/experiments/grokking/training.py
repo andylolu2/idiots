@@ -90,7 +90,7 @@ def dots(apply_fn, params, x, batch_size: int = 32):
     return jnp.linalg.matrix_rank(k)
 
 
-def init_state_ds(config):
+def init_state_and_ds(config):
     ds_train, ds_test = binary_op_splits(
         config.task, config.train_percentage, config.seed
     )
@@ -122,7 +122,7 @@ def init(config):
     log_dir = next_dir(config.log_dir).absolute().resolve()
     writer = SummaryWriter(log_dir=str(log_dir))
     mngr = ocp.CheckpointManager(log_dir / "checkpoints", metadata=config.to_dict())
-    state, ds_train, ds_test = init_state_ds(config)
+    state, ds_train, ds_test = init_state_and_ds(config)
     return state, ds_train, ds_test, writer, mngr
 
 
@@ -167,7 +167,7 @@ def restore(
         weight_decay=config.opt.weight_decay,
     )
     state = TrainState.create(apply_fn=model.apply, params=params, tx=tx)
-    state, ds_train, ds_test = init_state_ds(config)
+    state, ds_train, ds_test = init_state_and_ds(config)
 
     if step > 0:
         state = mngr.restore(step, args=ocp.args.StandardRestore(state))  # type: ignore
