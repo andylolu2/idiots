@@ -23,7 +23,7 @@ flags.mark_flags_as_required(["config"])
 
 def compute_dots(state: TrainState, ds: Dataset, sample_size: int) -> int:
     random_indices = random.sample(range(len(ds)), sample_size)
-    return dots(state.apply_fn, state.params, ds.select(random_indices)["x"])
+    return dots(state.apply_fn, state.params, ds.select(random_indices)["x"]).item()
 
 
 def main(_):

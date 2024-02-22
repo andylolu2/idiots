@@ -13,26 +13,12 @@ from tensorboardX import SummaryWriter
 from idiots.dataset.dataloader import DataLoader
 from idiots.dataset.image_classification import mnist_splits
 from idiots.experiments.classification.model import ImageMLP
-from idiots.experiments.grokking.training import dots, eval_step, train_step
-from idiots.utils import metrics, next_dir, num_params
+from idiots.experiments.grokking.training import TrainState, dots, eval_step, train_step
+from idiots.utils import get_optimizer, metrics, next_dir, num_params
 
 FLAGS = flags.FLAGS
 config_flags.DEFINE_config_file("config", short_name="c", lock_config=True)
 flags.mark_flags_as_required(["config"])
-
-
-class TrainState(train_state.TrainState):
-    """We might want to add some extra fields down the line.
-
-    The base class already has the following fields:
-        step: int
-        apply_fn: Callable
-        params: core.FrozenDict[str, Any]
-        tx: optax.GradientTransformation
-        opt_state: optax.OptState
-    """
-
-    ...
 
 
 def compute_dots(
@@ -48,38 +34,25 @@ def init(config):
     rng = jax.random.PRNGKey(0)
     log_dir = next_dir(config.log_dir).absolute().resolve()
     writer = SummaryWriter(log_dir=str(log_dir))
-    mmgr = ocp.CheckpointManager(log_dir / "checkpoints", metadata=config.to_dict())
+    mngr = ocp.CheckpointManager(log_dir / "checkpoints", metadata=config.to_dict())
 
     ds_train, ds_test = mnist_splits(config.train_size, config.test_size, config.seed)
-
     model = ImageMLP(
         hidden=config.model.d_model,
         n_layers=config.model.n_layers,
         out=ds_train.features["y"].num_classes,
     )
     params = model.init(rng, ds_train["x"][:1])
-
-    tx = optax.adamw(
-        learning_rate=optax.join_schedules(
-            [
-                optax.linear_schedule(0, config.opt.lr, config.opt.warmup_steps),
-                optax.constant_schedule(config.opt.lr),
-            ],
-            boundaries=[config.opt.warmup_steps],
-        ),
-        b1=0.9,
-        b2=0.98,
-        weight_decay=config.opt.weight_decay,
-    )
-    state = TrainState.create(apply_fn=model.apply, params=params, tx=tx)
-
+    tx = get_optimizer(**config.opt)
     logging.info("Number of parameters: %d", num_params(params))
-    return state, ds_train, ds_test, writer, mmgr
+
+    state = TrainState.create(apply_fn=model.apply, params=params, tx=tx)
+    return state, ds_train, ds_test, writer, mngr
 
 
 def main(_):
     config = FLAGS.config
-    state, ds_train, ds_test, writer, mmgr = init(config)
+    state, ds_train, ds_test, writer, mngr = init(config)
 
     train_iter = iter(
         DataLoader(ds_train, config.train_batch_size, shuffle=True, infinite=True)
@@ -118,7 +91,7 @@ def main(_):
                 writer.add_scalar("train/dots", dots_train, state.step)
 
         if state.step % config.save_every == 0 and config.save_every > 0:
-            mmgr.save(state.step, args=ocp.args.StandardSave(state))  # type: ignore
+            mngr.save(state.step, args=ocp.args.StandardSave(state))  # type: ignore
 
 
 if __name__ == "__main__":

@@ -15,7 +15,7 @@ from tensorboardX import SummaryWriter
 
 from idiots.dataset.algorithmic import binary_op_splits
 from idiots.experiments.grokking.model import TransformerSingleOutput
-from idiots.utils import next_dir
+from idiots.utils import get_optimizer, next_dir
 
 
 class TrainState(train_state.TrainState):
@@ -87,7 +87,7 @@ def dots(apply_fn, params, x, batch_size: int = 32):
     )
     k = nt.batch(inner_ntk, batch_size=batch_size)(x, None, params)
     k = rearrange(k, "b1 b2 d1 d2 -> (b1 d1) (b2 d2)")
-    return jnp.linalg.matrix_rank(k)
+    return jnp.linalg.matrix_rank(k)  # type: ignore
 
 
 def init_state_and_ds(config):
@@ -102,18 +102,7 @@ def init_state_and_ds(config):
         max_len=ds_train.features["x"].length,
     )
     params = model.init(jax.random.PRNGKey(config.seed), ds_train["x"][:1])
-    tx = optax.adamw(
-        learning_rate=optax.join_schedules(
-            [
-                optax.linear_schedule(0, config.opt.lr, config.opt.warmup_steps),
-                optax.constant_schedule(config.opt.lr),
-            ],
-            boundaries=[config.opt.warmup_steps],
-        ),
-        b1=0.9,
-        b2=0.98,
-        weight_decay=config.opt.weight_decay,
-    )
+    tx = get_optimizer("adamw", **config.opt)
     state = TrainState.create(apply_fn=model.apply, params=params, tx=tx)
     return state, ds_train, ds_test
 
@@ -153,19 +142,8 @@ def restore(
     params = model.init(
         rng, ds_train["x"][:1]
     )  # Model needs example to pass to forward function
+    tx = get_optimizer("adamw", **config.opt)
 
-    tx = optax.adamw(
-        learning_rate=optax.join_schedules(
-            [
-                optax.linear_schedule(0, config.opt.lr, config.opt.warmup_steps),
-                optax.constant_schedule(config.opt.lr),
-            ],
-            boundaries=[config.opt.warmup_steps],
-        ),
-        b1=0.9,
-        b2=0.98,
-        weight_decay=config.opt.weight_decay,
-    )
     state = TrainState.create(apply_fn=model.apply, params=params, tx=tx)
     state, ds_train, ds_test = init_state_and_ds(config)
 

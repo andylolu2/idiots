@@ -28,6 +28,7 @@ def get_config():
     )
 
     config.opt = dict(
+        name="adamw",
         lr=1e-3,
         weight_decay=0.01,
         warmup_steps=10,
