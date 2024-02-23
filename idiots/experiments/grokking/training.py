@@ -7,6 +7,7 @@ import jax.numpy as jnp
 import neural_tangents as nt
 import optax
 import orbax.checkpoint as ocp
+from datasets import Dataset
 from einops import rearrange
 from flax.training import train_state
 from ml_collections import ConfigDict
@@ -14,7 +15,7 @@ from tensorboardX import SummaryWriter
 
 from idiots.dataset.algorithmic import binary_op_splits
 from idiots.experiments.grokking.model import TransformerSingleOutput
-from idiots.utils import next_dir
+from idiots.utils import get_optimizer, next_dir
 
 
 class TrainState(train_state.TrainState):
@@ -73,20 +74,17 @@ def loss_fn(y_pred, y, variant="cross_entropy"):
         raise ValueError(f"Unknown loss variant: {variant}")
 
 
-@jax.jit
-def dots(state: TrainState, x):
-    kernel_fn = nt.empirical_kernel_fn(
-        state.apply_fn,
-        trace_axes=(),
-        vmap_axes=0,
-        implementation=nt.NtkImplementation.STRUCTURED_DERIVATIVES,
-    )
-    k = kernel_fn(x, None, "ntk", state.params)
+def dots(kernel_fn, params, x, batch_size: int = 32):
+    """Compute the DOTS (rank of the NTK/Jacobian)
+
+    Don't need to jit this as `nt.batch` already jits `inner_ntk`.
+    """
+    k = nt.batch(kernel_fn, batch_size=batch_size)(x, None, params)
     k = rearrange(k, "b1 b2 d1 d2 -> (b1 d1) (b2 d2)")
     return jnp.linalg.matrix_rank(k)  # type: ignore
 
 
-def init_state_ds(config):
+def init_state_and_ds(config):
     ds_train, ds_test = binary_op_splits(
         config.task, config.train_percentage, config.seed
     )
@@ -98,18 +96,7 @@ def init_state_ds(config):
         max_len=ds_train.features["x"].length,
     )
     params = model.init(jax.random.PRNGKey(config.seed), ds_train["x"][:1])
-    tx = optax.adamw(
-        learning_rate=optax.join_schedules(
-            [
-                optax.linear_schedule(0, config.opt.lr, config.opt.warmup_steps),
-                optax.constant_schedule(config.opt.lr),
-            ],
-            boundaries=[config.opt.warmup_steps],
-        ),
-        b1=0.9,
-        b2=0.98,
-        weight_decay=config.opt.weight_decay,
-    )
+    tx = get_optimizer("adamw", **config.opt)
     state = TrainState.create(apply_fn=model.apply, params=params, tx=tx)
     return state, ds_train, ds_test
 
@@ -118,11 +105,13 @@ def init(config):
     log_dir = next_dir(config.log_dir).absolute().resolve()
     writer = SummaryWriter(log_dir=str(log_dir))
     mngr = ocp.CheckpointManager(log_dir / "checkpoints", metadata=config.to_dict())
-    state, ds_train, ds_test = init_state_ds(config)
+    state, ds_train, ds_test = init_state_and_ds(config)
     return state, ds_train, ds_test, writer, mngr
 
 
-def restore(checkponit_dir: Path, step: int):
+def restore(
+    checkponit_dir: Path, step: int
+) -> tuple[Any, TrainState, Dataset, Dataset]:
     checkponit_dir = checkponit_dir.absolute().resolve()
     mngr = ocp.CheckpointManager(
         checkponit_dir,
@@ -131,9 +120,10 @@ def restore(checkponit_dir: Path, step: int):
         ),
     )
     config: Any = ConfigDict(mngr.metadata())
-    state, ds_train, ds_test = init_state_ds(config)
+    state, ds_train, ds_test = init_state_and_ds(config)
 
     if step > 0:
         state = mngr.restore(step, args=ocp.args.StandardRestore(state))  # type: ignore
+        assert isinstance(state, TrainState)
 
     return config, state, ds_train, ds_test

@@ -4,6 +4,7 @@ from pathlib import Path
 import jax
 
 from .metrics import metrics
+from .optimizers import get_optimizer
 
 
 def num_params(params):
