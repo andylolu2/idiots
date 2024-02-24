@@ -64,7 +64,7 @@ logs_base_path = "../../../logs/"
 experiments = [("mnist", "mnist-tenth", "checkpoints/mnist/checkpoints", "classification", 100, 3000, 0.1, 0.5),
                ("mnist", "mnist-quarter", "checkpoints/mnist/checkpoints", "classification", 100, 3000, 0.25, 0.5),
                ("mnist", "mnist-half", "checkpoints/mnist/checkpoints", "classification", 100, 3000, 0.5, 0.5),
-               ("mnist", "mnist-whole", "checkpoints/mnist/checkpoints", "classification", 100, 3000, 1, 0.5)
+               ("mnist", "mnist-whole", "checkpoints/mnist/checkpoints", "classification", 100, 3000, 1, 0.5),
                ("div", "div", "checkpoints/division/checkpoints", "grokking", 1000, 50_000, 1, 0.5), 
                ("div_mse", "div_mse", "checkpoints/division_mse/checkpoints", "grokking", 1000, 50_000, 1, 0.5), 
                ("s5", "s5", "checkpoints/s5/checkpoints", "grokking", 1000, 50_000, 1, 0.5)]
