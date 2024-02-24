@@ -53,18 +53,29 @@ def eval_checkpoint(step, batch_size, checkpoint_dir, experiment_type):
 
 logs_base_path = "../../../logs/"
 
-experiments = [("mnist", "checkpoints/mnist/checkpoints", "classification"), ("div", "checkpoints/division/checkpoints", "grokking"), ("div_mse", "checkpoints/division_mse/checkpoints", "grokking"), ("s5", "checkpoints/s5/checkpoints", "grokking")]
+# In form (experiment_name, experiment_checkpoint_path, experiment_type, svm_proportion_of_data, svm_training_data_proportion)
 
-for experiment_name, experiment_path, experiment_type in experiments:
+# experiment_type = "classification" or "grokking", they require different restore functions 
+
+# The number of data samples the SVM is trained on = TEST_DATA_SIZE * svm_proportion_of_data * svm_training_data_proportion
+# The number of data samples the SVM is tested on = TEST_DATA_SIZE * svm_proportion_of_data * (1 - svm_training_data_proportion)
+# Note that the SVM is trained on the transformer test data
+
+experiments = [("mnist", "checkpoints/mnist/checkpoints", "classification", 0.5, 0.5), 
+               ("div", "checkpoints/division/checkpoints", "grokking", 1, 0.5), 
+               ("div_mse", "checkpoints/division_mse/checkpoints", "grokking", 1, 0.5), 
+               ("s5", "checkpoints/s5/checkpoints", "grokking", 1, 0.5)]
+
+for experiment_name, experiment_path, experiment_type, svm_proportion_of_data, svm_training_data_proportion in experiments:
 
   print("Experiment:", experiment_name)
 
   checkpoint_dir = Path(logs_base_path, experiment_path)
-  eval_checkpoint_batch_size = 512 # !!!!!
+  eval_checkpoint_batch_size = 1 # !!!!!
 
   # Extract data from checkpoints 
   data = []
-  for step in range(0, 50000, 1000): # !!!!!
+  for step in range(0, 50000, 40000): # !!!!!
     state, ds_train, ds_test, train_loss, train_acc, test_loss, test_acc = eval_checkpoint(step, eval_checkpoint_batch_size, checkpoint_dir, experiment_type)
     data.append(
         {
@@ -105,23 +116,22 @@ for experiment_name, experiment_path, experiment_type in experiments:
   dots_results = []
   computed_kernels = []
 
-  N_train = 512 # !!!!!
-  N_test = 512 # !!!!! 
+  X_test = jnp.array(test_data_checkpoints[0]['x'])
+  Y_test = jnp.array(test_data_checkpoints[0]['y'])
 
-  X_test_full = jnp.array(test_data_checkpoints[0]['x'][:N_test])
-  Y_test_full = jnp.array(test_data_checkpoints[0]['y'][:N_test])
+  X_test_num_samples = len(X_test)
+  batch_size = 32
 
-  X_test_for_svm_training = X_test_full[:len(X_test_full) // 2]
-  Y_test_for_svm_training = Y_test_full[:len(Y_test_full) // 2]
+  dots_num_samples = X_test_num_samples // batch_size * batch_size
+  dots_X = X_test[:dots_num_samples]
 
-  X_test_for_svm_testing = X_test_full[len(X_test_full) // 2:]
-  Y_test_for_svm_testing = Y_test_full[len(Y_test_full) // 2:]
+  svm_train_num_samples = int(X_test_num_samples * svm_proportion_of_data * svm_training_data_proportion) // batch_size * batch_size 
+  svm_X_train = X_test[:svm_train_num_samples]
+  svm_Y_train = Y_test[:svm_train_num_samples]
 
-  # X_train = jnp.array(train_data_checkpoints[0]['x'][:N_train])
-  # Y_train = jnp.array(train_data_checkpoints[0]['y'][:N_train])
-
-  # X_test = jnp.array(test_data_checkpoints[0]['x'][:N_test])
-  # Y_test = jnp.array(test_data_checkpoints[0]['y'][:N_test])
+  svm_test_num_samples = int(X_test_num_samples * svm_proportion_of_data * (1 - svm_training_data_proportion)) // batch_size * batch_size 
+  svm_X_test = X_test[svm_train_num_samples:svm_train_num_samples+svm_test_num_samples]
+  svm_Y_test = X_test[svm_train_num_samples:svm_train_num_samples+svm_test_num_samples]
 
   for i in range(len(state_checkpoints)):
 
@@ -137,8 +147,8 @@ for experiment_name, experiment_path, experiment_type in experiments:
                                        vmap_axes=0,
                                        implementation=nt.NtkImplementation.STRUCTURED_DERIVATIVES,)
 
-    kernel_fn_batched = nt.batch(kernel_fn, device_count=-1, batch_size=32)
-    kernel = kernel_fn_batched(X_test_full, None, "ntk", state.params)
+    kernel_fn_batched = nt.batch(kernel_fn, device_count=-1, batch_size=batch_size)
+    kernel = kernel_fn_batched(dots_X, None, "ntk", state.params)
 
     computed_kernels.append(kernel.tolist())
     dots_results.append(jnp.linalg.matrix_rank(kernel).item())
@@ -146,15 +156,15 @@ for experiment_name, experiment_path, experiment_type in experiments:
     # Compute SVM accuracy 
 
     def custom_kernel(X1, X2):
-      kernel_fn_batched = nt.batch(kernel_fn, device_count=-1, batch_size=32)
+      kernel_fn_batched = nt.batch(kernel_fn, device_count=-1, batch_size=batch_size)
       return kernel_fn_batched(X1, X2, "ntk", state.params)
 
     svc = SVC(kernel=custom_kernel)
 
-    svc.fit(X_test_for_svm_training, Y_test_for_svm_training)
+    svc.fit(svm_X_train, svm_Y_train)
 
-    predictions = svc.predict(X_test_for_svm_testing)
-    accuracy = accuracy_score(Y_test_for_svm_testing, predictions)
+    predictions = svc.predict(svm_X_test)
+    accuracy = accuracy_score(svm_Y_test, predictions)
 
     svm_accuracy.append(accuracy)
 
