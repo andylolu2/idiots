@@ -85,6 +85,10 @@ def dots(kernel_fn, params, x, batch_size: int = 32):
 
 
 def init_state_and_ds(config):
+    
+    print(config)
+    print(type(config))
+    
     ds_train, ds_test = binary_op_splits(
         config.task, config.train_percentage, config.seed
     )

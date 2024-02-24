@@ -46,16 +46,16 @@ def eval_checkpoint(step, batch_size):
 
 logs_base_path = "../../../logs/"
 
-experiments = [("div", "checkpoints/division/checkpoints"), ("div_mse", "checkpoints/division_mse/checkpoints"), ("s5", "checkpoints/s5/checkpoints")]
+experiments = [("mnist", "checkpoints/mnist/checkpoints")] # [("div", "checkpoints/division/checkpoints"), ("div_mse", "checkpoints/division_mse/checkpoints"), ("s5", "checkpoints/s5/checkpoints"), ("mnist", "checkpoints/mnist/checkpoints")]
 
 for experiment_name, experiment_path in experiments:
 
   checkpoint_dir = Path(logs_base_path, experiment_path)
-  eval_checkpoint_batch_size = 512
+  eval_checkpoint_batch_size = 5 # 512 !!!!!
 
   # Extract data from checkpoints 
   data = []
-  for step in range(0, 50000, 10000):
+  for step in range(0, 50000, 40000): # 1000 !!!!!
     state, ds_train, ds_test, train_loss, train_acc, test_loss, test_acc = eval_checkpoint(step, eval_checkpoint_batch_size)
     data.append(
         {
@@ -96,8 +96,8 @@ for experiment_name, experiment_path in experiments:
   dots_results = []
   computed_kernels = []
 
-  N_train = 5 #512
-  N_test = 5 #512
+  N_train = 5 #512 !!!!!
+  N_test = 5 #512 !!!!! 
 
   X_test_full = jnp.array(test_data_checkpoints[0]['x'][:N_test])
   Y_test_full = jnp.array(test_data_checkpoints[0]['y'][:N_test])
