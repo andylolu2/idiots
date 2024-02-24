@@ -145,6 +145,7 @@ for experiment_name, experiment_path, experiment_type, svm_proportion_of_data, s
 
     kernel_fn = nt.empirical_kernel_fn(state.apply_fn,
                                        vmap_axes=0,
+                                       trace_axes=(),
                                        implementation=nt.NtkImplementation.STRUCTURED_DERIVATIVES,)
 
     kernel_fn_batched = nt.batch(kernel_fn, device_count=-1, batch_size=batch_size)
