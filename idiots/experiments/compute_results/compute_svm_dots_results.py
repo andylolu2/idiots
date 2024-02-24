@@ -61,10 +61,10 @@ logs_base_path = "../../../logs/"
 # The number of data samples the SVM is tested on = TEST_DATA_SIZE * svm_proportion_of_data * (1 - svm_training_data_proportion)
 # Note that the SVM is trained on the transformer test data
 
-experiments = [("mnist", "mnist-tenth", "checkpoints/mnist/checkpoints", "classification", 100, 3000, 0.1, 0.5),
-               ("mnist", "mnist-quarter", "checkpoints/mnist/checkpoints", "classification", 100, 3000, 0.25, 0.5),
-               ("mnist", "mnist-half", "checkpoints/mnist/checkpoints", "classification", 100, 3000, 0.5, 0.5),
-               ("mnist", "mnist-whole", "checkpoints/mnist/checkpoints", "classification", 100, 3000, 1, 0.5),
+experiments = [("mnist", "mnist-tenth", "checkpoints/mnist/checkpoints", "classification", 100, 3000, 0.1, 0.2),
+               ("mnist", "mnist-quarter", "checkpoints/mnist/checkpoints", "classification", 100, 3000, 0.25, 0.2),
+               ("mnist", "mnist-half", "checkpoints/mnist/checkpoints", "classification", 100, 3000, 0.5, 0.2),
+               ("mnist", "mnist-whole", "checkpoints/mnist/checkpoints", "classification", 100, 3000, 1, 0.2),
                ("div", "div", "checkpoints/division/checkpoints", "grokking", 1000, 50_000, 1, 0.5), 
                ("div_mse", "div_mse", "checkpoints/division_mse/checkpoints", "grokking", 1000, 50_000, 1, 0.5), 
                ("s5", "s5", "checkpoints/s5/checkpoints", "grokking", 1000, 50_000, 1, 0.5)]
@@ -74,11 +74,11 @@ for experiment_name, experiment_json_file_name, experiment_path, experiment_type
   print("Experiment:", experiment_name)
 
   checkpoint_dir = Path(logs_base_path, experiment_path)
-  eval_checkpoint_batch_size = 512 # !!!!!
+  eval_checkpoint_batch_size = 512
 
   # Extract data from checkpoints 
   data = []
-  for step in range(0, total_epochs, step_distance): # !!!!!
+  for step in range(0, total_epochs, step_distance):
     state, ds_train, ds_test, train_loss, train_acc, test_loss, test_acc = eval_checkpoint(step, eval_checkpoint_batch_size, checkpoint_dir, experiment_type)
     data.append(
         {
