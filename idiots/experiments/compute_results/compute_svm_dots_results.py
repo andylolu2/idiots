@@ -6,7 +6,8 @@ import pandas as pd
 import matplotlib.pyplot as plt
 
 from idiots.dataset.dataloader import DataLoader
-from idiots.experiments.grokking.training import restore, eval_step
+from idiots.experiments.grokking.training import restore as grokking_restore, eval_step
+from idiots.experiments.classification.training import restore as classification_restore
 from idiots.utils import metrics
 import neural_tangents as nt
 from einops import rearrange
@@ -23,8 +24,14 @@ warnings.filterwarnings('ignore')
 
 # --- Helper Functions ---
 
-def eval_checkpoint(step, batch_size):
-  config, state, ds_train, ds_test = restore(checkpoint_dir, step)
+def eval_checkpoint(step, batch_size, checkpoint_dir, experiment_type):
+  if experiment_type == "grokking":
+    config, state, ds_train, ds_test = grokking_restore(checkpoint_dir, step)
+  elif experiment_type == "classification":
+    config, state, ds_train, ds_test = classification_restore(checkpoint_dir, step)
+  else: 
+    print(f"Experiment type {experiment_type} not valid.")
+    exit(1)
 
   def eval_loss_acc(ds):
     for batch in DataLoader(ds, batch_size):
@@ -46,17 +53,19 @@ def eval_checkpoint(step, batch_size):
 
 logs_base_path = "../../../logs/"
 
-experiments = [("mnist", "checkpoints/mnist/checkpoints")] # [("div", "checkpoints/division/checkpoints"), ("div_mse", "checkpoints/division_mse/checkpoints"), ("s5", "checkpoints/s5/checkpoints"), ("mnist", "checkpoints/mnist/checkpoints")]
+experiments = [("mnist", "checkpoints/mnist/checkpoints", "classification"), ("div", "checkpoints/division/checkpoints", "grokking"), ("div_mse", "checkpoints/division_mse/checkpoints", "grokking"), ("s5", "checkpoints/s5/checkpoints", "grokking")]
 
-for experiment_name, experiment_path in experiments:
+for experiment_name, experiment_path, experiment_type in experiments:
+
+  print("Experiment:", experiment_name)
 
   checkpoint_dir = Path(logs_base_path, experiment_path)
-  eval_checkpoint_batch_size = 5 # 512 !!!!!
+  eval_checkpoint_batch_size = 512 # !!!!!
 
   # Extract data from checkpoints 
   data = []
-  for step in range(0, 50000, 40000): # 1000 !!!!!
-    state, ds_train, ds_test, train_loss, train_acc, test_loss, test_acc = eval_checkpoint(step, eval_checkpoint_batch_size)
+  for step in range(0, 50000, 1000): # !!!!!
+    state, ds_train, ds_test, train_loss, train_acc, test_loss, test_acc = eval_checkpoint(step, eval_checkpoint_batch_size, checkpoint_dir, experiment_type)
     data.append(
         {
             "step": step,
@@ -96,8 +105,8 @@ for experiment_name, experiment_path in experiments:
   dots_results = []
   computed_kernels = []
 
-  N_train = 5 #512 !!!!!
-  N_test = 5 #512 !!!!! 
+  N_train = 512 # !!!!!
+  N_test = 512 # !!!!! 
 
   X_test_full = jnp.array(test_data_checkpoints[0]['x'][:N_test])
   Y_test_full = jnp.array(test_data_checkpoints[0]['y'][:N_test])
@@ -153,7 +162,7 @@ for experiment_name, experiment_path in experiments:
   graph_data = {
       "training_loss": training_loss,
       "test_loss": test_loss,
-      "training_acc": train_acc,
+      "training_acc": training_acc,
       "test_acc": test_acc,
       "svm_accuracy": svm_accuracy,
       "dots": dots_results,
@@ -162,7 +171,7 @@ for experiment_name, experiment_path in experiments:
 
   json_data = json.dumps(graph_data, indent=2)
 
-  checkpoint_dir = Path(logs_base_path, "results", f"{experiment_name}.json")
+  checkpoint_dir = Path(logs_base_path, "results", f"{experiment_name}-alternate-trained.json")
 
   with open(checkpoint_dir, "w") as json_file:
     json_file.write(json_data)
