@@ -61,10 +61,8 @@ logs_base_path = "../../../logs/"
 # The number of data samples the SVM is tested on = TEST_DATA_SIZE * svm_proportion_of_data * (1 - svm_training_data_proportion)
 # Note that the SVM is trained on the transformer test data
 
-experiments = [("mnist", "mnist-tenth", "checkpoints/mnist/checkpoints", "classification", 100, 3000, 0.1, 0.25),
-               ("mnist", "mnist-quarter", "checkpoints/mnist/checkpoints", "classification", 100, 3000, 0.25, 0.25),
-               ("mnist", "mnist-half", "checkpoints/mnist/checkpoints", "classification", 100, 3000, 0.5, 0.25),
-               ("mnist", "mnist-whole", "checkpoints/mnist/checkpoints", "classification", 100, 3000, 1, 0.25),
+experiments = [("mnist", "mnist-tenth", "checkpoints/mnist/checkpoints", "classification", 100, 3000, 0.1, 0.5),
+               ("mnist", "mnist-quarter", "checkpoints/mnist/checkpoints", "classification", 100, 3000, 0.25, 0.5),
                ("div", "div", "checkpoints/division/checkpoints", "grokking", 1000, 50_000, 1, 0.5), 
                ("div_mse", "div_mse", "checkpoints/division_mse/checkpoints", "grokking", 1000, 50_000, 1, 0.5), 
                ("s5", "s5", "checkpoints/s5/checkpoints", "grokking", 1000, 50_000, 1, 0.5)]
@@ -125,7 +123,7 @@ for experiment_name, experiment_json_file_name, experiment_path, experiment_type
   X_test_num_samples = len(X_test)
   batch_size = 32
 
-  dots_num_samples = int(X_test_num_samples * svm_training_data_proportion) // batch_size * batch_size
+  dots_num_samples = int(X_test_num_samples * svm_proportion_of_data) // batch_size * batch_size
   dots_X = X_test[:dots_num_samples]
 
   svm_train_num_samples = int(X_test_num_samples * svm_proportion_of_data * svm_training_data_proportion) // batch_size * batch_size 
