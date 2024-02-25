@@ -53,21 +53,17 @@ def eval_checkpoint(step, batch_size, checkpoint_dir, experiment_type):
 
 logs_base_path = "../../../logs/"
 
-# In form (experiment_name, experiment_checkpoint_path, experiment_type, svm_proportion_of_data, svm_training_data_proportion)
+# In form (experiment_name, experiment_checkpoint_path, experiment_type, step_distance, total_epochs)
 
-# experiment_type = "classification" or "grokking", they require different restore functions 
+# step_distance = distance between checkpoints 
+# total_epochs = value of the highest checkpoint 
 
-# The number of data samples the SVM is trained on = TEST_DATA_SIZE * svm_proportion_of_data * svm_training_data_proportion
-# The number of data samples the SVM is tested on = TEST_DATA_SIZE * svm_proportion_of_data * (1 - svm_training_data_proportion)
-# Note that the SVM is trained on the transformer test data
+experiments = [("mnist", "mnist-tenth", "checkpoints/mnist/checkpoints", "classification", 100, 3000),
+               ("div", "div", "checkpoints/division/checkpoints", "grokking", 1000, 50_000), 
+               ("div_mse", "div_mse", "checkpoints/division_mse/checkpoints", "grokking", 1000, 50_000), 
+               ("s5", "s5", "checkpoints/s5/checkpoints", "grokking", 1000, 50_000)]
 
-experiments = [("mnist", "mnist-tenth", "checkpoints/mnist/checkpoints", "classification", 100, 3000, 0.1, 0.5),
-               ("mnist", "mnist-quarter", "checkpoints/mnist/checkpoints", "classification", 100, 3000, 0.25, 0.5),
-               ("div", "div", "checkpoints/division/checkpoints", "grokking", 1000, 50_000, 1, 0.5), 
-               ("div_mse", "div_mse", "checkpoints/division_mse/checkpoints", "grokking", 1000, 50_000, 1, 0.5), 
-               ("s5", "s5", "checkpoints/s5/checkpoints", "grokking", 1000, 50_000, 1, 0.5)]
-
-for experiment_name, experiment_json_file_name, experiment_path, experiment_type, step_distance, total_epochs, svm_proportion_of_data, svm_training_data_proportion in experiments:
+for experiment_name, experiment_json_file_name, experiment_path, experiment_type, step_distance, total_epochs in experiments:
 
   print("Experiment:", experiment_name)
 
@@ -146,6 +142,20 @@ for experiment_name, experiment_json_file_name, experiment_path, experiment_type
 
     kernel_fn = nt.empirical_kernel_fn(state.apply_fn,
                                        vmap_axes=0,
+                                       implementation=nt.NtkImplementation.STRUCTURED_DERIVATIVES,)
+    
+    kernel_fn_batched = nt.batch(kernel_fn, device_count=-1, batch_size=batch_size)
+    kernel = kernel_fn_batched(dots_X, None, "ntk", state.params)
+
+    computed_kernels.append(kernel.tolist())
+
+    z = jnp.linalg.matrix_rank(kernel)
+    print(z.shape)
+
+    dots_results.append(z.item())
+
+    kernel_fn = nt.empirical_kernel_fn(state.apply_fn,
+                                       vmap_axes=0,
                                        trace_axes=(),
                                        implementation=nt.NtkImplementation.STRUCTURED_DERIVATIVES,)
 
@@ -153,7 +163,11 @@ for experiment_name, experiment_json_file_name, experiment_path, experiment_type
     kernel = kernel_fn_batched(dots_X, None, "ntk", state.params)
 
     computed_kernels.append(kernel.tolist())
-    dots_results.append(jnp.linalg.matrix_rank(kernel).item())
+
+    z = jnp.linalg.matrix_rank(kernel)
+    print(z.shape)
+
+    dots_results.append(z.item())
 
     # Compute SVM accuracy 
 
