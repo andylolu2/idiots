@@ -18,6 +18,8 @@ import os
 import warnings
 import gc
 
+TEST_MODE = True 
+
 os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
 
 warnings.filterwarnings('ignore')
@@ -54,7 +56,7 @@ def eval_checkpoint(step, batch_size, checkpoint_dir, experiment_type):
 
 logs_base_path = "../../../logs/"
 
-# In form (experiment_name, experiment_checkpoint_path, experiment_type, step_distance, total_epochs)
+# In form (experiment_name, experiment_checkpoint_path, experiment_type, step_distance, total_epochs, num_dots_samples, num_svm_training_samples, num_svm_test_samples)
 
 # step_distance = distance between checkpoints
 # total_epochs = value of the highest checkpoint
@@ -67,12 +69,18 @@ experiments = [("mnist", "mnist-32", "checkpoints/mnist/checkpoints", "classific
                ("div_mse", "div_mse", "checkpoints/division_mse/checkpoints", "grokking", 1000, 50_000, 256, 256, 256),
                ("s5", "s5", "checkpoints/s5/checkpoints", "grokking", 1000, 50_000, 256, 256, 256)]
 
-for experiment_name, experiment_json_file_name, experiment_path, experiment_type, step_distance, total_epochs, dots_samples, svm_training_samples, svm_test_samples in experiments:
+for experiment_name, experiment_json_file_name, experiment_path, experiment_type, step_distance, total_epochs, num_dots_samples, num_svm_training_samples, num_svm_test_samples in experiments:
+
+  # Only take one total step in TEST_MODE 
+  step_distance = step_distance if not TEST_MODE else total_epochs 
+  eval_checkpoint_batch_size = 512 if not TEST_MODE else 5 
+  num_dots_samples = num_dots_samples if not TEST_MODE else 5
+  num_svm_training_samples = num_svm_training_samples if not TEST_MODE else 5
+  num_svm_test_samples = num_svm_test_samples if not TEST_MODE else 5
 
   print("Experiment:", experiment_name)
 
   checkpoint_dir = Path(logs_base_path, experiment_path)
-  eval_checkpoint_batch_size = 512
 
   # Extract data from checkpoints
   data = []
@@ -122,13 +130,13 @@ for experiment_name, experiment_json_file_name, experiment_path, experiment_type
 
   batch_size = 32
 
-  dots_X = X_test[:dots_samples]
+  dots_X = X_test[:num_dots_samples]
 
-  svm_X_train = X_test[:svm_training_samples]
-  svm_Y_train = Y_test[:svm_training_samples]
+  svm_X_train = X_test[:num_svm_training_samples]
+  svm_Y_train = Y_test[:num_svm_training_samples]
 
-  svm_X_test = X_test[svm_training_samples:svm_training_samples+svm_test_samples]
-  svm_Y_test = Y_test[svm_training_samples:svm_training_samples+svm_test_samples]
+  svm_X_test = X_test[num_svm_training_samples:num_svm_training_samples+num_svm_test_samples]
+  svm_Y_test = Y_test[num_svm_training_samples:num_svm_training_samples+num_svm_test_samples]
 
   kernel_fn_trace = nt.empirical_kernel_fn(state.apply_fn,
                                            vmap_axes=0,
@@ -153,13 +161,7 @@ for experiment_name, experiment_json_file_name, experiment_path, experiment_type
     kernel = kernel_fn_trace_batched(dots_X, None, "ntk", state.params)
     kernel = rearrange(kernel, "b1 b2 d1 d2 -> (b1 d1) (b2 d2)")
 
-    print(kernel)
-    print(kernel.tolist())
-
     computed_kernels.append(kernel.tolist())
-
-    print(jnp.linalg.matrix_rank(kernel))
-    print(jnp.linalg.matrix_rank(kernel).item())
 
     dots_results.append(jnp.linalg.matrix_rank(kernel).item())
 
@@ -188,8 +190,6 @@ for experiment_name, experiment_json_file_name, experiment_path, experiment_type
       "dots": dots_results,
       "kernel": computed_kernels,
   }
-
-  print(graph_data)
 
   json_data = json.dumps(graph_data, indent=2)
 
