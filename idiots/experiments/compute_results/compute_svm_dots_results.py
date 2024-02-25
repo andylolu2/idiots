@@ -142,30 +142,16 @@ for experiment_name, experiment_json_file_name, experiment_path, experiment_type
 
     kernel_fn = nt.empirical_kernel_fn(state.apply_fn,
                                        vmap_axes=0,
-                                       implementation=nt.NtkImplementation.STRUCTURED_DERIVATIVES,)
-    
-    kernel_fn_batched = nt.batch(kernel_fn, device_count=-1, batch_size=batch_size)
-    kernel = kernel_fn_batched(dots_X, None, "ntk", state.params)
-
-    computed_kernels.append(kernel.tolist())
-
-    z = jnp.linalg.matrix_rank(kernel)
-    print(z.shape)
-
-    dots_results.append(z.item())
-
-    kernel_fn = nt.empirical_kernel_fn(state.apply_fn,
-                                       vmap_axes=0,
                                        trace_axes=(),
                                        implementation=nt.NtkImplementation.STRUCTURED_DERIVATIVES,)
 
     kernel_fn_batched = nt.batch(kernel_fn, device_count=-1, batch_size=batch_size)
     kernel = kernel_fn_batched(dots_X, None, "ntk", state.params)
+    kernel = rearrange(kernel, "b1 b2 d1 d2 -> (b1 d1) (b2 d2)")
 
     computed_kernels.append(kernel.tolist())
 
     z = jnp.linalg.matrix_rank(kernel)
-    print(z.shape)
 
     dots_results.append(z.item())
 
