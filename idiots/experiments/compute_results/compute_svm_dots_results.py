@@ -123,16 +123,16 @@ for experiment_name, experiment_json_file_name, experiment_path, experiment_type
   X_test_num_samples = len(X_test)
   batch_size = 32
 
-  dots_num_samples = int(X_test_num_samples * svm_proportion_of_data) // batch_size * batch_size
-  dots_X = X_test[:dots_num_samples]
+  #dots_num_samples = int(X_test_num_samples * svm_proportion_of_data) // batch_size * batch_size
+  dots_X = X_test[:512]
 
-  svm_train_num_samples = int(X_test_num_samples * svm_proportion_of_data * svm_training_data_proportion) // batch_size * batch_size 
-  svm_X_train = X_test[:svm_train_num_samples]
-  svm_Y_train = Y_test[:svm_train_num_samples]
+  #svm_train_num_samples = int(X_test_num_samples * svm_proportion_of_data * svm_training_data_proportion) // batch_size * batch_size 
+  svm_X_train = X_test[:512]
+  svm_Y_train = Y_test[:512]
 
-  svm_test_num_samples = int(X_test_num_samples * svm_proportion_of_data * (1 - svm_training_data_proportion)) // batch_size * batch_size 
-  svm_X_test = X_test[svm_train_num_samples:svm_train_num_samples+svm_test_num_samples]
-  svm_Y_test = X_test[svm_train_num_samples:svm_train_num_samples+svm_test_num_samples]
+  #svm_test_num_samples = int(X_test_num_samples * svm_proportion_of_data * (1 - svm_training_data_proportion)) // batch_size * batch_size 
+  svm_X_test = X_test[512:1024]
+  svm_Y_test = X_test[512:1024]
 
   for i in range(len(state_checkpoints)):
 
