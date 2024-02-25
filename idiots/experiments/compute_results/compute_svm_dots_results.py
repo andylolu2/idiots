@@ -154,7 +154,13 @@ for experiment_name, experiment_json_file_name, experiment_path, experiment_type
     kernel = kernel_fn_trace_batched(dots_X, None, "ntk", state.params)
     kernel = rearrange(kernel, "b1 b2 d1 d2 -> (b1 d1) (b2 d2)")
 
+    print(kernel)
+    print(kernel.tolist())
+
     computed_kernels.append(kernel.tolist())
+
+    print(jnp.linalg.matrix_rank(kernel))
+    print(jnp.linalg.matrix_rank(kernel).item())
 
     dots_results.append(jnp.linalg.matrix_rank(kernel).item())
 
@@ -183,6 +189,8 @@ for experiment_name, experiment_json_file_name, experiment_path, experiment_type
       "dots": dots_results,
       "kernel": computed_kernels,
   }
+
+  print(graph_data)
 
   json_data = json.dumps(graph_data, indent=2)
 
