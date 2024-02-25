@@ -24,12 +24,13 @@ warnings.filterwarnings('ignore')
 
 # --- Helper Functions ---
 
+
 def eval_checkpoint(step, batch_size, checkpoint_dir, experiment_type):
   if experiment_type == "grokking":
     config, state, ds_train, ds_test = grokking_restore(checkpoint_dir, step)
   elif experiment_type == "classification":
     config, state, ds_train, ds_test = classification_restore(checkpoint_dir, step)
-  else: 
+  else:
     print(f"Experiment type {experiment_type} not valid.")
     exit(1)
 
@@ -55,22 +56,22 @@ logs_base_path = "../../../logs/"
 
 # In form (experiment_name, experiment_checkpoint_path, experiment_type, step_distance, total_epochs)
 
-# step_distance = distance between checkpoints 
-# total_epochs = value of the highest checkpoint 
+# step_distance = distance between checkpoints
+# total_epochs = value of the highest checkpoint
 
-experiments = [("mnist", "mnist-tenth", "checkpoints/mnist/checkpoints", "classification", 100, 3000),
-               ("div", "div", "checkpoints/division/checkpoints", "grokking", 1000, 50_000), 
-               ("div_mse", "div_mse", "checkpoints/division_mse/checkpoints", "grokking", 1000, 50_000), 
-               ("s5", "s5", "checkpoints/s5/checkpoints", "grokking", 1000, 50_000)]
+experiments = [("mnist", "mnist-tenth", "checkpoints/mnist/checkpoints", "classification", 100, 3000, 512, 512, 512),
+               ("div", "div", "checkpoints/division/checkpoints", "grokking", 1000, 50_000, 512, 512, 512),
+               ("div_mse", "div_mse", "checkpoints/division_mse/checkpoints", "grokking", 1000, 50_000, 512, 512, 512),
+               ("s5", "s5", "checkpoints/s5/checkpoints", "grokking", 1000, 50_000, 512, 512, 512)]
 
-for experiment_name, experiment_json_file_name, experiment_path, experiment_type, step_distance, total_epochs in experiments:
+for experiment_name, experiment_json_file_name, experiment_path, experiment_type, step_distance, total_epochs, dots_samples, svm_training_samples, svm_test_samples in experiments:
 
   print("Experiment:", experiment_name)
 
   checkpoint_dir = Path(logs_base_path, experiment_path)
   eval_checkpoint_batch_size = 512
 
-  # Extract data from checkpoints 
+  # Extract data from checkpoints
   data = []
   for step in range(0, total_epochs, step_distance):
     state, ds_train, ds_test, train_loss, train_acc, test_loss, test_acc = eval_checkpoint(step, eval_checkpoint_batch_size, checkpoint_dir, experiment_type)
@@ -87,7 +88,7 @@ for experiment_name, experiment_json_file_name, experiment_path, experiment_type
         }
     )
 
-  # Get state and train/test data lists 
+  # Get state and train/test data lists
   df = pd.DataFrame(data)
 
   df_loss = df[["step", "train_loss", "test_loss"]]
@@ -108,7 +109,7 @@ for experiment_name, experiment_json_file_name, experiment_path, experiment_type
   train_data_checkpoints = df['ds_train'].tolist()
   test_data_checkpoints = df['ds_test'].tolist()
 
-  # Compute SVM accuracy, dots and kernels from each recorded checkpoint  
+  # Compute SVM accuracy, dots and kernels from each recorded checkpoint
   svm_accuracy = []
   dots_results = []
   computed_kernels = []
@@ -116,20 +117,25 @@ for experiment_name, experiment_json_file_name, experiment_path, experiment_type
   X_test = jnp.array(test_data_checkpoints[0]['x'])
   Y_test = jnp.array(test_data_checkpoints[0]['y'])
 
-  X_test_num_samples = len(X_test)
   batch_size = 32
 
-  #dots_num_samples = int(X_test_num_samples * svm_proportion_of_data) // batch_size * batch_size
-  dots_X = X_test[:512]
+  dots_X = X_test[:dots_samples]
 
-  #svm_train_num_samples = int(X_test_num_samples * svm_proportion_of_data * svm_training_data_proportion) // batch_size * batch_size 
-  svm_X_train = X_test[:512]
-  svm_Y_train = Y_test[:512]
+  svm_X_train = X_test[:svm_training_samples]
+  svm_Y_train = Y_test[:svm_training_samples]
 
-  #svm_test_num_samples = int(X_test_num_samples * svm_proportion_of_data * (1 - svm_training_data_proportion)) // batch_size * batch_size 
-  svm_X_test = X_test[512:1024]
-  svm_Y_test = X_test[512:1024]
+  svm_X_test = X_test[svm_training_samples:svm_training_samples+svm_test_samples]
+  svm_Y_test = X_test[svm_training_samples:svm_training_samples+svm_test_samples]
 
+  kernel_fn_trace = nt.empirical_kernel_fn(state.apply_fn,
+                                           vmap_axes=0,
+                                           trace_axes=(),
+                                           implementation=nt.NtkImplementation.STRUCTURED_DERIVATIVES,)
+
+  kernel_fn = nt.empirical_kernel_fn(state.apply_fn,
+                                     vmap_axes=0,
+                                     implementation=nt.NtkImplementation.STRUCTURED_DERIVATIVES,)
+  
   for i in range(len(state_checkpoints)):
 
     gc.collect()
@@ -138,24 +144,17 @@ for experiment_name, experiment_json_file_name, experiment_path, experiment_type
 
     state = state_checkpoints[i]
 
-    # Compute kernel and DOTS 
+    # Compute kernel and DOTS
 
-    kernel_fn = nt.empirical_kernel_fn(state.apply_fn,
-                                       vmap_axes=0,
-                                       trace_axes=(),
-                                       implementation=nt.NtkImplementation.STRUCTURED_DERIVATIVES,)
-
-    kernel_fn_batched = nt.batch(kernel_fn, device_count=-1, batch_size=batch_size)
-    kernel = kernel_fn_batched(dots_X, None, "ntk", state.params)
+    kernel_fn_trace_batched = nt.batch(kernel_fn_trace, device_count=-1, batch_size=batch_size)
+    kernel = kernel_fn_trace_batched(dots_X, None, "ntk", state.params)
     kernel = rearrange(kernel, "b1 b2 d1 d2 -> (b1 d1) (b2 d2)")
 
     computed_kernels.append(kernel.tolist())
 
-    z = jnp.linalg.matrix_rank(kernel)
+    dots_results.append(jnp.linalg.matrix_rank(kernel).item())
 
-    dots_results.append(z.item())
-
-    # Compute SVM accuracy 
+    # Compute SVM accuracy
 
     def custom_kernel(X1, X2):
       kernel_fn_batched = nt.batch(kernel_fn, device_count=-1, batch_size=batch_size)
@@ -170,7 +169,7 @@ for experiment_name, experiment_json_file_name, experiment_path, experiment_type
 
     svm_accuracy.append(accuracy)
 
-  # Store results as a JSON file 
+  # Store results as a JSON file
   graph_data = {
       "training_loss": training_loss,
       "test_loss": test_loss,
@@ -178,7 +177,7 @@ for experiment_name, experiment_json_file_name, experiment_path, experiment_type
       "test_acc": test_acc,
       "svm_accuracy": svm_accuracy,
       "dots": dots_results,
-      "kernel": computed_kernels, 
+      "kernel": computed_kernels,
   }
 
   json_data = json.dumps(graph_data, indent=2)
