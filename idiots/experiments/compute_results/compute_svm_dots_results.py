@@ -125,7 +125,7 @@ for experiment_name, experiment_json_file_name, experiment_path, experiment_type
   svm_Y_train = Y_test[:svm_training_samples]
 
   svm_X_test = X_test[svm_training_samples:svm_training_samples+svm_test_samples]
-  svm_Y_test = X_test[svm_training_samples:svm_training_samples+svm_test_samples]
+  svm_Y_test = Y_test[svm_training_samples:svm_training_samples+svm_test_samples]
 
   kernel_fn_trace = nt.empirical_kernel_fn(state.apply_fn,
                                            vmap_axes=0,
