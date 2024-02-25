@@ -59,7 +59,11 @@ logs_base_path = "../../../logs/"
 # step_distance = distance between checkpoints
 # total_epochs = value of the highest checkpoint
 
-experiments = [("mnist", "mnist-tenth", "checkpoints/mnist/checkpoints", "classification", 100, 3000, 512, 512, 512),
+experiments = [("mnist", "mnist-32", "checkpoints/mnist/checkpoints", "classification", 100, 3000, 512, 32, 512),
+               ("mnist", "mnist-64", "checkpoints/mnist/checkpoints", "classification", 100, 3000, 512, 64, 512),
+               ("mnist", "mnist-128", "checkpoints/mnist/checkpoints", "classification", 100, 3000, 512, 128, 512),
+               ("mnist", "mnist-256", "checkpoints/mnist/checkpoints", "classification", 100, 3000, 512, 256, 512),
+               ("mnist", "mnist-512", "checkpoints/mnist/checkpoints", "classification", 100, 3000, 512, 512, 512),
                ("div", "div", "checkpoints/division/checkpoints", "grokking", 1000, 50_000, 512, 512, 512),
                ("div_mse", "div_mse", "checkpoints/division_mse/checkpoints", "grokking", 1000, 50_000, 512, 512, 512),
                ("s5", "s5", "checkpoints/s5/checkpoints", "grokking", 1000, 50_000, 512, 512, 512)]
