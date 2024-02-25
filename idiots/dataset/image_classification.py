@@ -24,7 +24,7 @@ if __name__ == "__main__":
 
     from idiots.dataset.dataloader import DataLoader
 
-    ds_train, ds_test = mnist_splits(50000, 10000)
+    ds_train, ds_test = mnist_splits(60000, 10000)
     print(ds_train.features)
     for item in DataLoader(ds_train, 32):
         print(item["x"].shape, item["y"].shape)
@@ -34,7 +34,7 @@ if __name__ == "__main__":
     # Performance test
     start = perf_counter()
     n_iters = 0
-    for batch in DataLoader(ds_train, 256):
+    for batch in DataLoader(ds_train, 512):
         n_iters += 1
     print(f"Time: {perf_counter() - start:.4f} seconds")
-    print(f"Time/step: {(perf_counter() - start) / 100:.4f} seconds")
+    print(f"Step/s: {n_iters / (perf_counter() - start):.4f}")
