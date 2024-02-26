@@ -61,13 +61,14 @@ logs_base_path = "../../../logs/"
 # step_distance = distance between checkpoints
 # total_epochs = value of the highest checkpoint
 
-experiments = [("mnist", "mnist-32", "checkpoints/mnist/checkpoints", "classification", 100, 3000, 256, 32, 256),
-               ("mnist", "mnist-64", "checkpoints/mnist/checkpoints", "classification", 100, 3000, 256, 64, 256),
-               ("mnist", "mnist-128", "checkpoints/mnist/checkpoints", "classification", 100, 3000, 256, 128, 256),
-               ("mnist", "mnist-256", "checkpoints/mnist/checkpoints", "classification", 100, 3000, 256, 256, 256),
-               ("div", "div", "checkpoints/division/checkpoints", "grokking", 1000, 50_000, 256, 256, 256),
-               ("div_mse", "div_mse", "checkpoints/division_mse/checkpoints", "grokking", 1000, 50_000, 256, 256, 256),
-               ("s5", "s5", "checkpoints/s5/checkpoints", "grokking", 1000, 50_000, 256, 256, 256)]
+experiments = [("mnist", "mnist-32", "checkpoints/mnist/checkpoints", "classification", 100, 3000, 512, 32, 512),
+               ("mnist", "mnist-64", "checkpoints/mnist/checkpoints", "classification", 100, 3000, 512, 64, 512),
+               ("mnist", "mnist-128", "checkpoints/mnist/checkpoints", "classification", 100, 3000, 512, 128, 512),
+               ("mnist", "mnist-256", "checkpoints/mnist/checkpoints", "classification", 100, 3000, 512, 256, 512),
+               ("mnist", "mnist-512", "checkpoints/mnist/checkpoints", "classification", 100, 3000, 512, 512, 512),
+               ("div", "div", "checkpoints/division/checkpoints", "grokking", 1000, 50_000, 512, 512, 512),
+               ("div_mse", "div_mse", "checkpoints/division_mse/checkpoints", "grokking", 1000, 50_000, 512, 512, 512),
+               ("s5", "s5", "checkpoints/s5/checkpoints", "grokking", 1000, 50_000, 512, 512, 512)]
 
 for experiment_name, experiment_json_file_name, experiment_path, experiment_type, step_distance, total_epochs, num_dots_samples, num_svm_training_samples, num_svm_test_samples in experiments:
 
@@ -158,12 +159,13 @@ for experiment_name, experiment_json_file_name, experiment_path, experiment_type
     # Compute kernel and DOTS
 
     kernel_fn_trace_batched = nt.batch(kernel_fn_trace, device_count=-1, batch_size=batch_size)
-    kernel = kernel_fn_trace_batched(dots_X, None, "ntk", state.params)
-    kernel = rearrange(kernel, "b1 b2 d1 d2 -> (b1 d1) (b2 d2)")
+    kernel_trace = kernel_fn_trace_batched(dots_X, None, "ntk", state.params)
+    kernel_trace = rearrange(kernel_trace, "b1 b2 d1 d2 -> (b1 d1) (b2 d2)")
+    dots_results.append(jnp.linalg.matrix_rank(kernel_trace).item())
 
+    kernel_fn_batched = nt.batch(kernel_fn_trace, device_count=-1, batch_size=batch_size)
+    kernel = kernel_fn_batched(dots_X, None, "ntk", state.params)
     computed_kernels.append(kernel.tolist())
-
-    dots_results.append(jnp.linalg.matrix_rank(kernel).item())
 
     # Compute SVM accuracy
 
