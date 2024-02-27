@@ -67,19 +67,11 @@ def restore(
         state = mngr.restore(step, args=ocp.args.StandardRestore(state))  # type: ignore
         assert isinstance(state, TrainState)
 
-    return config, state, ds_train, ds_test
+    return mngr, config, state, ds_train, ds_test
 
 def restore_partial(
-    checkpoint_dir: Path, step: int, training_data_example, num_classes: int  
+    mngr, step: int, training_data_example, num_classes: int  
 ) -> tuple[Any, TrainState, Dataset, Dataset]:
-    checkpoint_dir = checkpoint_dir.absolute().resolve()
-    mngr = ocp.CheckpointManager(
-        checkpoint_dir,
-        options=ocp.CheckpointManagerOptions(
-            read_only=True, save_interval_steps=0, create=False
-        ),
-    )
-
     # Load the config from the checkpoint, but add any new defaults
     config = get_config()
     override_config = ConfigDict(mngr.metadata())

@@ -27,13 +27,13 @@ warnings.filterwarnings('ignore')
 # --- Helper Functions ---
 
 
-def eval_checkpoint(step, batch_size, checkpoint_dir, experiment_type, ds_train, ds_test, num_classes):
+def eval_checkpoint(step, batch_size, experiment_type, ds_train, ds_test, num_classes, mngr):
   if experiment_type == "grokking":
     print(f"Experiment type {experiment_type} not valid.")
     exit(1)
     # config, state, _, _ = grokking_restore_partial(checkpoint_dir, step)
   elif experiment_type == "classification":
-    config, state = classification_restore_partial(checkpoint_dir, step, ds_train["x"][:1], num_classes)
+    config, state = classification_restore_partial(mngr, step, ds_train["x"][:1], num_classes)
   else:
     print(f"Experiment type {experiment_type} not valid.")
     exit(1)
@@ -67,10 +67,10 @@ logs_base_path = "../../../logs/"
 # step_distance = distance between checkpoints
 # total_epochs = value of the highest checkpoint
 
-experiments = [("mnist", "mnist-64", "checkpoints/mnist/checkpoints", "classification", 1000, 10_000, 512, 32, 512),
-               ("div", "div", "checkpoints/division/checkpoints", "grokking", 1000, 50_000, 512, 512, 512),
-               ("div_mse", "div_mse", "checkpoints/division_mse/checkpoints", "grokking", 1000, 50_000, 512, 512, 512),
-               ("s5", "s5", "checkpoints/s5/checkpoints", "grokking", 1000, 50_000, 512, 512, 512)]
+experiments = [("mnist", "mnist-64", "checkpoints/mnist/checkpoints", "classification", 40, 2000, 512, 64, 512)]
+              #  ("div", "div", "checkpoints/division/checkpoints", "grokking", 1000, 50_000, 512, 512, 512),
+              #  ("div_mse", "div_mse", "checkpoints/division_mse/checkpoints", "grokking", 1000, 50_000, 512, 512, 512),
+              #  ("s5", "s5", "checkpoints/s5/checkpoints", "grokking", 1000, 50_000, 512, 512, 512)]
 
 for experiment_name, experiment_json_file_name, experiment_path, experiment_type, step_distance, total_epochs, num_dots_samples, num_svm_training_samples, num_svm_test_samples in experiments:
  
@@ -85,9 +85,9 @@ for experiment_name, experiment_json_file_name, experiment_path, experiment_type
   checkpoint_dir = Path(logs_base_path, experiment_path)
 
   if experiment_type == "grokking":
-    _, _, ds_train, ds_test = grokking_restore(checkpoint_dir, 0)
+    mngr, _, _, ds_train, ds_test = grokking_restore(checkpoint_dir, 0)
   elif experiment_type == "classification":
-    _, _, ds_train, ds_test = classification_restore(checkpoint_dir, 0)
+    mngr, _, _, ds_train, ds_test = classification_restore(checkpoint_dir, 0)
   else:
     print(f"Experiment type {experiment_type} not valid.")
     exit(1)
@@ -100,7 +100,7 @@ for experiment_name, experiment_json_file_name, experiment_path, experiment_type
   # Extract data from checkpoints
   data = []
   for step in range(0, total_epochs, step_distance):
-    state, train_loss, train_acc, test_loss, test_acc = eval_checkpoint(step, eval_checkpoint_batch_size, checkpoint_dir, experiment_type, ds_train, ds_test, num_classes)
+    state, train_loss, train_acc, test_loss, test_acc = eval_checkpoint(step, eval_checkpoint_batch_size, experiment_type, ds_train, ds_test, num_classes, mngr)
     data.append(
         {
             "step": step,
