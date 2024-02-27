@@ -62,19 +62,19 @@ def eval_checkpoint(step, batch_size, experiment_type, ds_train, ds_test, num_cl
 
 logs_base_path = "../../../logs/"
 
-# In form (experiment_name, experiment_checkpoint_path, experiment_type, step_distance, total_epochs, num_dots_samples, num_svm_training_samples, num_svm_test_samples)
+# In form (experiment_name, experiment_checkpoint_path, experiment_type, step_distance, total_steps, num_dots_samples, num_svm_training_samples, num_svm_test_samples)
 
 # step_distance = distance between checkpoints
-# total_epochs = value of the highest checkpoint
+# total_steps = value of the highest checkpoint
 
 experiments = [("mnist", "mnist-64", "checkpoints/mnist/checkpoints", "classification", 40, 2000, 512, 64, 512)]
               #  ("div", "div", "checkpoints/division/checkpoints", "grokking", 1000, 50_000, 512, 512, 512),
               #  ("div_mse", "div_mse", "checkpoints/division_mse/checkpoints", "grokking", 1000, 50_000, 512, 512, 512),
               #  ("s5", "s5", "checkpoints/s5/checkpoints", "grokking", 1000, 50_000, 512, 512, 512)]
 
-for experiment_name, experiment_json_file_name, experiment_path, experiment_type, step_distance, total_epochs, num_dots_samples, num_svm_training_samples, num_svm_test_samples in experiments:
+for experiment_name, experiment_json_file_name, experiment_path, experiment_type, step_distance, total_steps, num_dots_samples, num_svm_training_samples, num_svm_test_samples in experiments:
  
-  step_distance = step_distance if not TEST_MODE else total_epochs # Only take one total step in TEST_MODE
+  step_distance = step_distance if not TEST_MODE else total_steps # Only take one total step in TEST_MODE
   eval_checkpoint_batch_size = 512 if not TEST_MODE else 5 
   num_dots_samples = num_dots_samples if not TEST_MODE else 5
   num_svm_training_samples = num_svm_training_samples if not TEST_MODE else 5
@@ -99,9 +99,9 @@ for experiment_name, experiment_json_file_name, experiment_path, experiment_type
 
   # Extract data from checkpoints
   data = []
-  for step in range(0, total_epochs, step_distance):
+  for step in range(0, total_steps, step_distance):
 
-    print(f"Step: {step}/{total_epochs // step_distance}")
+    print(f"Step: {(step // step_distance) - 1}/{total_steps // step_distance}")
 
     state, train_loss, train_acc, test_loss, test_acc = eval_checkpoint(step, eval_checkpoint_batch_size, experiment_type, ds_train, ds_test, num_classes, mngr)
     data.append(
@@ -164,7 +164,7 @@ for experiment_name, experiment_json_file_name, experiment_path, experiment_type
 
     gc.collect()
 
-    print(f"Iteration: {i}/{len(state_checkpoints)}")
+    print(f"Iteration: {i - 1}/{len(state_checkpoints)}")
 
     state = state_checkpoints[i]
 
