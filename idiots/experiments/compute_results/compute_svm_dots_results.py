@@ -6,7 +6,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 
 from idiots.dataset.dataloader import DataLoader
-from idiots.experiments.grokking.training import restore as grokking_restore, eval_step
+from idiots.experiments.grokking.training import restore as grokking_restore, restore_partial as grokking_restore_partial, eval_step
 from idiots.experiments.classification.training import restore as classification_restore, restore_partial as classification_restore_partial
 from idiots.utils import metrics
 import neural_tangents as nt
@@ -27,13 +27,11 @@ warnings.filterwarnings('ignore')
 # --- Helper Functions ---
 
 
-def eval_checkpoint(step, batch_size, checkpoint_dir, experiment_type, ds_train, ds_test, num_classes):
+def eval_checkpoint(step, batch_size, experiment_type, ds_train, ds_test, num_classes, mngr, feature_length):
   if experiment_type == "grokking":
-    print(f"Experiment type {experiment_type} not valid.")
-    exit(1)
-    # config, state, _, _ = grokking_restore_partial(checkpoint_dir, step)
+    config, state = grokking_restore_partial(mngr, step, ds_train["x"][:1], num_classes, feature_length)
   elif experiment_type == "classification":
-    config, state = classification_restore_partial(checkpoint_dir, step, ds_train["x"][:1], num_classes)
+    config, state = classification_restore_partial(mngr, step, ds_train["x"][:1], num_classes)
   else:
     print(f"Experiment type {experiment_type} not valid.")
     exit(1)
@@ -47,7 +45,8 @@ def eval_checkpoint(step, batch_size, checkpoint_dir, experiment_type, ds_train,
     acc = jnp.concatenate(accuracies).mean().item()
     return loss, acc
 
-  ds_train = ds_train.select(range(len(ds_test['x'])))
+  if len(ds_train['x']) > len(ds_test['x']): 
+    ds_train = ds_train.select(range(len(ds_test['x'])))
 
   train_loss, train_acc = eval_loss_acc(ds_train)
   test_loss, test_acc = eval_loss_acc(ds_test)
@@ -62,19 +61,21 @@ def eval_checkpoint(step, batch_size, checkpoint_dir, experiment_type, ds_train,
 
 logs_base_path = "/home/dc755/idiots/logs/"
 
-# In form (experiment_name, experiment_checkpoint_path, experiment_type, step_distance, total_epochs, num_dots_samples, num_svm_training_samples, num_svm_test_samples)
+# In form (experiment_name, experiment_checkpoint_path, experiment_type, step_distance, total_steps, num_dots_samples, num_svm_training_samples, num_svm_test_samples)
 
 # step_distance = distance between checkpoints
-# total_epochs = value of the highest checkpoint
+# total_steps = value of the highest checkpoint
 
-experiments = [("mnist", "mnist-256", "checkpoints/mnist/exp2/checkpoints", "classification", 100, 10000, 512, 256, 512), ("mnist", "mnist-512", "checkpoints/mnist/exp2/checkpoints", "classification", 100, 10000, 512, 512, 512)]
-              #  ("div", "div", "checkpoints/division/exp21/checkpoints", "grokking", 1000, 50_000, 512, 512, 512),
-              #  ("div_mse", "div_mse", "checkpoints/division_mse/exp22/checkpoints", "grokking", 1000, 50_000, 512, 512, 512),
-              # ("s5", "s5", "checkpoints/s5/exp24/checkpoints", "grokking", 1000, 50_000, 512, 512, 512)]
+experiments = [
+               #("mnist", "mnist-64", "checkpoints/mnist/checkpoints", "classification", 40, 2000, 512, 64, 512),
+               ("div", "div", "checkpoints/division/exp21/checkpoints", "grokking", 1000, 50_000, 512, 512, 512),
+               ("div_mse", "div_mse", "checkpoints/exp22/division_mse/checkpoints", "grokking", 1000, 50_000, 512, 512, 512),
+               ("s5", "s5", "checkpoints/s5/exp24/checkpoints", "grokking", 1000, 50_000, 512, 512, 512)
+              ]
 
-for experiment_name, experiment_json_file_name, experiment_path, experiment_type, step_distance, total_epochs, num_dots_samples, num_svm_training_samples, num_svm_test_samples in experiments:
+for experiment_name, experiment_json_file_name, experiment_path, experiment_type, step_distance, total_steps, num_dots_samples, num_svm_training_samples, num_svm_test_samples in experiments:
  
-  step_distance = step_distance if not TEST_MODE else total_epochs # Only take one total step in TEST_MODE
+  step_distance = step_distance if not TEST_MODE else total_steps # Only take one total step in TEST_MODE
   eval_checkpoint_batch_size = 512 if not TEST_MODE else 5 
   num_dots_samples = num_dots_samples if not TEST_MODE else 5
   num_svm_training_samples = num_svm_training_samples if not TEST_MODE else 5
@@ -85,9 +86,9 @@ for experiment_name, experiment_json_file_name, experiment_path, experiment_type
   checkpoint_dir = Path(logs_base_path, experiment_path)
 
   if experiment_type == "grokking":
-    _, _, ds_train, ds_test = grokking_restore(checkpoint_dir, 0)
+    mngr, _, _, ds_train, ds_test = grokking_restore(checkpoint_dir, 0)
   elif experiment_type == "classification":
-    _, _, ds_train, ds_test = classification_restore(checkpoint_dir, 0)
+    mngr, _, _, ds_train, ds_test = classification_restore(checkpoint_dir, 0)
   else:
     print(f"Experiment type {experiment_type} not valid.")
     exit(1)
@@ -96,11 +97,15 @@ for experiment_name, experiment_json_file_name, experiment_path, experiment_type
   Y_test = jnp.array(ds_test['y'])
 
   num_classes = ds_train.features["y"].num_classes
+  feature_length = ds_train.features["x"].length
 
   # Extract data from checkpoints
   data = []
-  for step in range(0, total_epochs, step_distance):
-    state, train_loss, train_acc, test_loss, test_acc = eval_checkpoint(step, eval_checkpoint_batch_size, checkpoint_dir, experiment_type, ds_train, ds_test, num_classes)
+  for step in range(0, total_steps, step_distance):
+
+    print(f"Step: {(step // step_distance) + 1}/{total_steps // step_distance}")
+
+    state, train_loss, train_acc, test_loss, test_acc = eval_checkpoint(step, eval_checkpoint_batch_size, experiment_type, ds_train, ds_test, num_classes, mngr, feature_length)
     data.append(
         {
             "step": step,
@@ -161,7 +166,7 @@ for experiment_name, experiment_json_file_name, experiment_path, experiment_type
 
     gc.collect()
 
-    print(f"Iteration: {i}/{len(state_checkpoints)}")
+    print(f"Iteration: {i + 1}/{len(state_checkpoints)}")
 
     state = state_checkpoints[i]
 
