@@ -20,6 +20,7 @@ def get_config():
     config.test_batch_size = 512
 
     config.dots_sample_size = 64
+    config.dots_batch_size = 64
 
     config.model = dict(
         d_model=64,
