@@ -4,7 +4,7 @@ from ml_collections import ConfigDict
 def get_config():
     config = ConfigDict()
 
-    config.log_dir = "logs/grokking"
+    config.log_dir = "logs/checkpoints/grokking"
 
     config.seed = 0
     config.task = "x / y (mod 47)"
@@ -20,6 +20,7 @@ def get_config():
     config.test_batch_size = 512
 
     config.dots_sample_size = 64
+    config.dots_batch_size = 64
 
     config.model = dict(
         d_model=64,
