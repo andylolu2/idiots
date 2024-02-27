@@ -7,7 +7,7 @@ import matplotlib.pyplot as plt
 
 from idiots.dataset.dataloader import DataLoader
 from idiots.experiments.grokking.training import restore as grokking_restore, eval_step
-from idiots.experiments.classification.training import restore as classification_restore
+from idiots.experiments.classification.training import restore as classification_restore, restore_partial as classification_restore_partial
 from idiots.utils import metrics
 import neural_tangents as nt
 from einops import rearrange
@@ -18,7 +18,7 @@ import os
 import warnings
 import gc
 
-TEST_MODE = True 
+TEST_MODE = False 
 
 os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
 
@@ -27,11 +27,13 @@ warnings.filterwarnings('ignore')
 # --- Helper Functions ---
 
 
-def eval_checkpoint(step, batch_size, checkpoint_dir, experiment_type):
+def eval_checkpoint(step, batch_size, checkpoint_dir, experiment_type, ds_train, ds_test, num_classes):
   if experiment_type == "grokking":
-    config, state, ds_train, ds_test = grokking_restore(checkpoint_dir, step)
+    print(f"Experiment type {experiment_type} not valid.")
+    exit(1)
+    # config, state, _, _ = grokking_restore_partial(checkpoint_dir, step)
   elif experiment_type == "classification":
-    config, state, ds_train, ds_test = classification_restore(checkpoint_dir, step)
+    config, state = classification_restore_partial(checkpoint_dir, step, ds_train["x"][:1], num_classes)
   else:
     print(f"Experiment type {experiment_type} not valid.")
     exit(1)
@@ -45,10 +47,14 @@ def eval_checkpoint(step, batch_size, checkpoint_dir, experiment_type):
     acc = jnp.concatenate(accuracies).mean().item()
     return loss, acc
 
+  ds_train = ds_train.select(range(len(ds_test['x'])))
+
   train_loss, train_acc = eval_loss_acc(ds_train)
   test_loss, test_acc = eval_loss_acc(ds_test)
 
-  return state, ds_train, ds_test, train_loss, train_acc, test_loss, test_acc
+  
+
+  return state, train_loss, train_acc, test_loss, test_acc
 
 
 # --- Main Loop ---
@@ -61,19 +67,14 @@ logs_base_path = "../../../logs/"
 # step_distance = distance between checkpoints
 # total_epochs = value of the highest checkpoint
 
-experiments = [("mnist", "mnist-32", "checkpoints/mnist/checkpoints", "classification", 100, 3000, 512, 32, 512),
-               ("mnist", "mnist-64", "checkpoints/mnist/checkpoints", "classification", 100, 3000, 512, 64, 512),
-               ("mnist", "mnist-128", "checkpoints/mnist/checkpoints", "classification", 100, 3000, 512, 128, 512),
-               ("mnist", "mnist-256", "checkpoints/mnist/checkpoints", "classification", 100, 3000, 512, 256, 512),
-               ("mnist", "mnist-512", "checkpoints/mnist/checkpoints", "classification", 100, 3000, 512, 512, 512),
+experiments = [("mnist", "mnist-64", "checkpoints/mnist/checkpoints", "classification", 1000, 10_000, 512, 32, 512),
                ("div", "div", "checkpoints/division/checkpoints", "grokking", 1000, 50_000, 512, 512, 512),
                ("div_mse", "div_mse", "checkpoints/division_mse/checkpoints", "grokking", 1000, 50_000, 512, 512, 512),
                ("s5", "s5", "checkpoints/s5/checkpoints", "grokking", 1000, 50_000, 512, 512, 512)]
 
 for experiment_name, experiment_json_file_name, experiment_path, experiment_type, step_distance, total_epochs, num_dots_samples, num_svm_training_samples, num_svm_test_samples in experiments:
-
-  # Only take one total step in TEST_MODE 
-  step_distance = step_distance if not TEST_MODE else total_epochs 
+ 
+  step_distance = step_distance if not TEST_MODE else total_epochs # Only take one total step in TEST_MODE
   eval_checkpoint_batch_size = 512 if not TEST_MODE else 5 
   num_dots_samples = num_dots_samples if not TEST_MODE else 5
   num_svm_training_samples = num_svm_training_samples if not TEST_MODE else 5
@@ -83,16 +84,27 @@ for experiment_name, experiment_json_file_name, experiment_path, experiment_type
 
   checkpoint_dir = Path(logs_base_path, experiment_path)
 
+  if experiment_type == "grokking":
+    _, _, ds_train, ds_test = grokking_restore(checkpoint_dir, 0)
+  elif experiment_type == "classification":
+    _, _, ds_train, ds_test = classification_restore(checkpoint_dir, 0)
+  else:
+    print(f"Experiment type {experiment_type} not valid.")
+    exit(1)
+
+  X_test = jnp.array(ds_test['x'])
+  Y_test = jnp.array(ds_test['y'])
+
+  num_classes = ds_train.features["y"].num_classes
+
   # Extract data from checkpoints
   data = []
   for step in range(0, total_epochs, step_distance):
-    state, ds_train, ds_test, train_loss, train_acc, test_loss, test_acc = eval_checkpoint(step, eval_checkpoint_batch_size, checkpoint_dir, experiment_type)
+    state, train_loss, train_acc, test_loss, test_acc = eval_checkpoint(step, eval_checkpoint_batch_size, checkpoint_dir, experiment_type, ds_train, ds_test, num_classes)
     data.append(
         {
             "step": step,
             "state": state,
-            "ds_train": ds_train,
-            "ds_test": ds_test,
             "train_loss": train_loss,
             "train_acc": train_acc,
             "test_loss": test_loss,
@@ -118,20 +130,17 @@ for experiment_name, experiment_json_file_name, experiment_path, experiment_type
 
   df = pd.DataFrame(data)
   state_checkpoints = df['state'].tolist()
-  train_data_checkpoints = df['ds_train'].tolist()
-  test_data_checkpoints = df['ds_test'].tolist()
 
   # Compute SVM accuracy, dots and kernels from each recorded checkpoint
   svm_accuracy = []
   dots_results = []
   computed_kernels = []
 
-  X_test = jnp.array(test_data_checkpoints[0]['x'])
-  Y_test = jnp.array(test_data_checkpoints[0]['y'])
-
   batch_size = 32
 
   dots_X = X_test[:num_dots_samples]
+
+  # TO STRATIFY 
 
   svm_X_train = X_test[:num_svm_training_samples]
   svm_Y_train = Y_test[:num_svm_training_samples]

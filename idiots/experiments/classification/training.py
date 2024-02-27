@@ -26,6 +26,16 @@ def init_state_and_ds(config):
     state = TrainState.create(apply_fn=model.apply, params=params, tx=tx)
     return state, ds_train, ds_test
 
+def init_state(config, training_data_example, num_classes):
+    model = ImageMLP(
+        hidden=config.model.d_model,
+        n_layers=config.model.n_layers,
+        out=num_classes,
+    )
+    params = model.init(jax.random.PRNGKey(config.seed), training_data_example)
+    tx = get_optimizer(**config.opt)
+    state = TrainState.create(apply_fn=model.apply, params=params, tx=tx)
+    return state
 
 def init(config):
     log_dir = next_dir(config.log_dir).absolute().resolve()
@@ -36,11 +46,11 @@ def init(config):
 
 
 def restore(
-    checkponit_dir: Path, step: int
+    checkpoint_dir: Path, step: int
 ) -> tuple[Any, TrainState, Dataset, Dataset]:
-    checkponit_dir = checkponit_dir.absolute().resolve()
+    checkpoint_dir = checkpoint_dir.absolute().resolve()
     mngr = ocp.CheckpointManager(
-        checkponit_dir,
+        checkpoint_dir,
         options=ocp.CheckpointManagerOptions(
             read_only=True, save_interval_steps=0, create=False
         ),
@@ -58,3 +68,27 @@ def restore(
         assert isinstance(state, TrainState)
 
     return config, state, ds_train, ds_test
+
+def restore_partial(
+    checkpoint_dir: Path, step: int, training_data_example, num_classes: int  
+) -> tuple[Any, TrainState, Dataset, Dataset]:
+    checkpoint_dir = checkpoint_dir.absolute().resolve()
+    mngr = ocp.CheckpointManager(
+        checkpoint_dir,
+        options=ocp.CheckpointManagerOptions(
+            read_only=True, save_interval_steps=0, create=False
+        ),
+    )
+
+    # Load the config from the checkpoint, but add any new defaults
+    config = get_config()
+    override_config = ConfigDict(mngr.metadata())
+    config.update(override_config)
+
+    state = init_state(config, training_data_example, num_classes)
+
+    if step > 0:
+        state = mngr.restore(step, args=ocp.args.StandardRestore(state))  # type: ignore
+        assert isinstance(state, TrainState)
+
+    return config, state

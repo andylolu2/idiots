@@ -112,11 +112,11 @@ def init(config):
 
 
 def restore(
-    checkponit_dir: Path, step: int
+    checkpoint_dir: Path, step: int
 ) -> tuple[Any, TrainState, Dataset, Dataset]:
-    checkponit_dir = checkponit_dir.absolute().resolve()
+    checkpoint_dir = checkpoint_dir.absolute().resolve()
     mngr = ocp.CheckpointManager(
-        checkponit_dir,
+        checkpoint_dir,
         options=ocp.CheckpointManagerOptions(
             read_only=True, save_interval_steps=0, create=False
         ),
@@ -134,3 +134,27 @@ def restore(
         assert isinstance(state, TrainState)
 
     return config, state, ds_train, ds_test
+
+# def restore(
+#     checkpoint_dir: Path, step: int
+# ) -> tuple[Any, TrainState, Dataset, Dataset]:
+#     checkpoint_dir = checkpoint_dir.absolute().resolve()
+#     mngr = ocp.CheckpointManager(
+#         checkpoint_dir,
+#         options=ocp.CheckpointManagerOptions(
+#             read_only=True, save_interval_steps=0, create=False
+#         ),
+#     )
+
+#     # Load the config from the checkpoint, but add any new defaults
+#     config = get_config()
+#     override_config = ConfigDict(mngr.metadata())
+#     config.update(override_config)
+
+#     state, _, _ = init_state_and_ds(config)
+
+#     if step > 0:
+#         state = mngr.restore(step, args=ocp.args.StandardRestore(state))  # type: ignore
+#         assert isinstance(state, TrainState)
+
+#     return config, state
