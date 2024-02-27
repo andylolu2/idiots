@@ -6,7 +6,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 
 from idiots.dataset.dataloader import DataLoader
-from idiots.experiments.grokking.training import restore as grokking_restore, eval_step
+from idiots.experiments.grokking.training import restore as grokking_restore, restore_partial as grokking_restore_partial, eval_step
 from idiots.experiments.classification.training import restore as classification_restore, restore_partial as classification_restore_partial
 from idiots.utils import metrics
 import neural_tangents as nt
@@ -27,11 +27,9 @@ warnings.filterwarnings('ignore')
 # --- Helper Functions ---
 
 
-def eval_checkpoint(step, batch_size, experiment_type, ds_train, ds_test, num_classes, mngr):
+def eval_checkpoint(step, batch_size, experiment_type, ds_train, ds_test, num_classes, mngr, feature_length):
   if experiment_type == "grokking":
-    print(f"Experiment type {experiment_type} not valid.")
-    exit(1)
-    # config, state, _, _ = grokking_restore_partial(checkpoint_dir, step)
+    config, state = grokking_restore_partial(mngr, step, ds_train["x"][:1], num_classes, feature_length)
   elif experiment_type == "classification":
     config, state = classification_restore_partial(mngr, step, ds_train["x"][:1], num_classes)
   else:
@@ -47,7 +45,8 @@ def eval_checkpoint(step, batch_size, experiment_type, ds_train, ds_test, num_cl
     acc = jnp.concatenate(accuracies).mean().item()
     return loss, acc
 
-  ds_train = ds_train.select(range(len(ds_test['x'])))
+  if len(ds_train['x']) > len(ds_test['x']): 
+    ds_train = ds_train.select(range(len(ds_test['x'])))
 
   train_loss, train_acc = eval_loss_acc(ds_train)
   test_loss, test_acc = eval_loss_acc(ds_test)
@@ -67,10 +66,12 @@ logs_base_path = "../../../logs/"
 # step_distance = distance between checkpoints
 # total_steps = value of the highest checkpoint
 
-experiments = [("mnist", "mnist-64", "checkpoints/mnist/checkpoints", "classification", 40, 2000, 512, 64, 512)]
-              #  ("div", "div", "checkpoints/division/checkpoints", "grokking", 1000, 50_000, 512, 512, 512),
+experiments = [
+               #("mnist", "mnist-64", "checkpoints/mnist/checkpoints", "classification", 40, 2000, 512, 64, 512),
+               ("div", "div", "checkpoints/division/checkpoints", "grokking", 1000, 50_000, 512, 512, 512),
               #  ("div_mse", "div_mse", "checkpoints/division_mse/checkpoints", "grokking", 1000, 50_000, 512, 512, 512),
-              #  ("s5", "s5", "checkpoints/s5/checkpoints", "grokking", 1000, 50_000, 512, 512, 512)]
+              #  ("s5", "s5", "checkpoints/s5/checkpoints", "grokking", 1000, 50_000, 512, 512, 512)
+              ]
 
 for experiment_name, experiment_json_file_name, experiment_path, experiment_type, step_distance, total_steps, num_dots_samples, num_svm_training_samples, num_svm_test_samples in experiments:
  
@@ -96,14 +97,15 @@ for experiment_name, experiment_json_file_name, experiment_path, experiment_type
   Y_test = jnp.array(ds_test['y'])
 
   num_classes = ds_train.features["y"].num_classes
+  feature_length = ds_train.features["x"].length
 
   # Extract data from checkpoints
   data = []
   for step in range(0, total_steps, step_distance):
 
-    print(f"Step: {step // step_distance}/{(total_steps // step_distance) - 1}")
+    print(f"Step: {(step // step_distance) + 1}/{total_steps // step_distance}")
 
-    state, train_loss, train_acc, test_loss, test_acc = eval_checkpoint(step, eval_checkpoint_batch_size, experiment_type, ds_train, ds_test, num_classes, mngr)
+    state, train_loss, train_acc, test_loss, test_acc = eval_checkpoint(step, eval_checkpoint_batch_size, experiment_type, ds_train, ds_test, num_classes, mngr, feature_length)
     data.append(
         {
             "step": step,
@@ -164,7 +166,7 @@ for experiment_name, experiment_json_file_name, experiment_path, experiment_type
 
     gc.collect()
 
-    print(f"Iteration: {i}/{len(state_checkpoints) - 1}")
+    print(f"Iteration: {i + 1}/{len(state_checkpoints)}")
 
     state = state_checkpoints[i]
 
