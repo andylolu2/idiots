@@ -68,7 +68,7 @@ logs_base_path = "../../../logs/"
 
 experiments = [
                #("mnist", "mnist-64", "checkpoints/mnist/checkpoints", "classification", 40, 2000, 512, 64, 512),
-               ("div", "div", "checkpoints/division/checkpoints", "grokking", 1000, 3000, 512, 512, 512),
+               ("div", "div", "checkpoints/division/checkpoints", "grokking", 1000, 50_000, 256, 256, 256),
               #  ("div_mse", "div_mse", "checkpoints/division_mse/checkpoints", "grokking", 1000, 50_000, 512, 512, 512),
               #  ("s5", "s5", "checkpoints/s5/checkpoints", "grokking", 1000, 50_000, 512, 512, 512)
               ]
@@ -163,6 +163,10 @@ for experiment_name, experiment_json_file_name, experiment_path, experiment_type
                                      vmap_axes=0,
                                      implementation=nt.NtkImplementation.STRUCTURED_DERIVATIVES,)
   
+  @jax.jit 
+  def calculate_kernel_rank(kernel_trace):
+    return jnp.linalg.matrix_rank(kernel_trace)
+
   for i in range(len(state_checkpoints)):
 
     gc.collect()
@@ -176,7 +180,10 @@ for experiment_name, experiment_json_file_name, experiment_path, experiment_type
     kernel_fn_trace_batched = nt.batch(kernel_fn_trace, device_count=-1, batch_size=batch_size)
     kernel_trace = kernel_fn_trace_batched(dots_X, None, "ntk", state.params)
     kernel_trace = rearrange(kernel_trace, "b1 b2 d1 d2 -> (b1 d1) (b2 d2)")
-    dots_results.append(jnp.linalg.matrix_rank(kernel_trace).item())
+    kernel_rank = calculate_kernel_rank(kernel_trace)
+    dots_results.append(kernel_rank.item())
+
+    # dots_results.append(jnp.linalg.matrix_rank(kernel_trace).item())
 
     kernel_fn_batched = nt.batch(kernel_fn, device_count=-1, batch_size=batch_size)
     kernel = kernel_fn_batched(dots_X, None, "ntk", state.params)
@@ -193,9 +200,12 @@ for experiment_name, experiment_json_file_name, experiment_path, experiment_type
     svc.fit(svm_X_train, svm_Y_train)
 
     predictions = svc.predict(svm_X_test)
+
     accuracy = accuracy_score(svm_Y_test, predictions)
 
     svm_accuracy.append(accuracy)
+
+  print("Storing Results")
 
   # Store results as a JSON file
   graph_data = {
