@@ -100,6 +100,9 @@ for experiment_name, experiment_json_file_name, experiment_path, experiment_type
   # Extract data from checkpoints
   data = []
   for step in range(0, total_epochs, step_distance):
+
+    print(f"Step: {i}/{total_epochs // step_distance}")
+
     state, train_loss, train_acc, test_loss, test_acc = eval_checkpoint(step, eval_checkpoint_batch_size, experiment_type, ds_train, ds_test, num_classes, mngr)
     data.append(
         {
