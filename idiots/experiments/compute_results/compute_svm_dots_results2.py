@@ -101,7 +101,7 @@ for experiment_name, experiment_json_file_name, experiment_path, experiment_type
   data = []
   for step in range(0, total_steps, step_distance):
 
-    print(f"Step: {step // step_distance}/{(total_steps // step_distance) - 1}")
+    print(f"Step: {(step // step_distance) - 1}/{total_steps // step_distance}")
 
     state, train_loss, train_acc, test_loss, test_acc = eval_checkpoint(step, eval_checkpoint_batch_size, experiment_type, ds_train, ds_test, num_classes, mngr)
     data.append(
@@ -137,7 +137,7 @@ for experiment_name, experiment_json_file_name, experiment_path, experiment_type
   # Compute SVM accuracy, dots and kernels from each recorded checkpoint
   svm_accuracy = []
   dots_results = []
-  computed_kernels = []
+  #computed_kernels = []
 
   batch_size = 32
 
@@ -164,7 +164,7 @@ for experiment_name, experiment_json_file_name, experiment_path, experiment_type
 
     gc.collect()
 
-    print(f"Iteration: {i}/{len(state_checkpoints) - 1}")
+    print(f"Iteration: {i - 1}/{len(state_checkpoints)}")
 
     state = state_checkpoints[i]
 
@@ -175,9 +175,9 @@ for experiment_name, experiment_json_file_name, experiment_path, experiment_type
     kernel_trace = rearrange(kernel_trace, "b1 b2 d1 d2 -> (b1 d1) (b2 d2)")
     dots_results.append(jnp.linalg.matrix_rank(kernel_trace).item())
 
-    kernel_fn_batched = nt.batch(kernel_fn, device_count=-1, batch_size=batch_size)
-    kernel = kernel_fn_batched(dots_X, None, "ntk", state.params)
-    computed_kernels.append(kernel.tolist())
+    #kernel_fn_batched = nt.batch(kernel_fn_trace, device_count=-1, batch_size=batch_size)
+    #kernel = kernel_fn_batched(dots_X, None, "ntk", state.params)
+    #computed_kernels.append(kernel.tolist())
 
     # Compute SVM accuracy
 
@@ -202,7 +202,7 @@ for experiment_name, experiment_json_file_name, experiment_path, experiment_type
       "test_acc": test_acc,
       "svm_accuracy": svm_accuracy,
       "dots": dots_results,
-      "kernel": computed_kernels,
+      #"kernel": computed_kernels,
   }
 
   json_data = json.dumps(graph_data, indent=2)
