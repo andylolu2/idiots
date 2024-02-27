@@ -68,7 +68,7 @@ logs_base_path = "/home/dc755/idiots/logs/"
 
 experiments = [
                #("mnist", "mnist-64", "checkpoints/mnist/checkpoints", "classification", 40, 2000, 512, 64, 512),
-               ("div", "div", "checkpoints/division/exp21/checkpoints", "grokking", 1000, 50_000, 512, 512, 512),
+              #  ("div", "div", "checkpoints/division/exp21/checkpoints", "grokking", 1000, 50_000, 512, 512, 512),
                ("div_mse", "div_mse", "checkpoints/exp22/division_mse/checkpoints", "grokking", 1000, 50_000, 512, 512, 512),
                ("s5", "s5", "checkpoints/s5/exp24/checkpoints", "grokking", 1000, 50_000, 512, 512, 512)
               ]
@@ -103,7 +103,7 @@ for experiment_name, experiment_json_file_name, experiment_path, experiment_type
   data = []
   for step in range(0, total_steps, step_distance):
 
-    print(f"Step: {(step // step_distance) + 1}/{total_steps // step_distance}")
+    print(f"Loading Data: {(step // step_distance) + 1}/{total_steps // step_distance}")
 
     state, train_loss, train_acc, test_loss, test_acc = eval_checkpoint(step, eval_checkpoint_batch_size, experiment_type, ds_train, ds_test, num_classes, mngr, feature_length)
     data.append(
@@ -128,6 +128,7 @@ for experiment_name, experiment_json_file_name, experiment_path, experiment_type
   df_acc = df_acc.melt("step", var_name="split", value_name="accuracy")
   df_acc["split"] = df_acc["split"].str.replace("_acc", "")
 
+  steps = df["step"].tolist() 
   training_loss = df_loss[df_loss["split"] == "train"]["loss"].tolist()
   test_loss = df_loss[df_loss["split"] == "test"]["loss"].tolist()
   training_acc = df_acc[df_acc["split"] == "train"]["accuracy"].tolist()
@@ -162,11 +163,15 @@ for experiment_name, experiment_json_file_name, experiment_path, experiment_type
                                      vmap_axes=0,
                                      implementation=nt.NtkImplementation.STRUCTURED_DERIVATIVES,)
   
+  @jax.jit 
+  def calculate_kernel_rank(kernel_trace):
+    return jnp.linalg.matrix_rank(kernel_trace)
+
   for i in range(len(state_checkpoints)):
 
     gc.collect()
 
-    print(f"Iteration: {i + 1}/{len(state_checkpoints)}")
+    print(f"Computing Results: {i + 1}/{len(state_checkpoints)}")
 
     state = state_checkpoints[i]
 
@@ -175,7 +180,10 @@ for experiment_name, experiment_json_file_name, experiment_path, experiment_type
     kernel_fn_trace_batched = nt.batch(kernel_fn_trace, device_count=-1, batch_size=batch_size)
     kernel_trace = kernel_fn_trace_batched(dots_X, None, "ntk", state.params)
     kernel_trace = rearrange(kernel_trace, "b1 b2 d1 d2 -> (b1 d1) (b2 d2)")
-    dots_results.append(jnp.linalg.matrix_rank(kernel_trace).item())
+    kernel_rank = calculate_kernel_rank(kernel_trace)
+    dots_results.append(kernel_rank.item())
+
+    # dots_results.append(jnp.linalg.matrix_rank(kernel_trace).item())
 
     kernel_fn_batched = nt.batch(kernel_fn, device_count=-1, batch_size=batch_size)
     kernel = kernel_fn_batched(dots_X, None, "ntk", state.params)
@@ -192,12 +200,16 @@ for experiment_name, experiment_json_file_name, experiment_path, experiment_type
     svc.fit(svm_X_train, svm_Y_train)
 
     predictions = svc.predict(svm_X_test)
+
     accuracy = accuracy_score(svm_Y_test, predictions)
 
     svm_accuracy.append(accuracy)
 
+  print("Storing Results")
+
   # Store results as a JSON file
   graph_data = {
+      "step": steps, 
       "training_loss": training_loss,
       "test_loss": test_loss,
       "training_acc": training_acc,
