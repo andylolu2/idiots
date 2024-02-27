@@ -14,6 +14,7 @@ from ml_collections import ConfigDict
 from tensorboardX import SummaryWriter
 
 from idiots.dataset.algorithmic import binary_op_splits
+from idiots.experiments.grokking.config import get_config
 from idiots.experiments.grokking.model import TransformerSingleOutput
 from idiots.utils import get_optimizer, next_dir
 
@@ -120,7 +121,12 @@ def restore(
             read_only=True, save_interval_steps=0, create=False
         ),
     )
-    config: Any = ConfigDict(mngr.metadata())
+
+    # Load the config from the checkpoint, but add any new defaults
+    config = get_config()
+    override_config = ConfigDict(mngr.metadata())
+    config.update(override_config)
+
     state, ds_train, ds_test = init_state_and_ds(config)
 
     if step > 0:
