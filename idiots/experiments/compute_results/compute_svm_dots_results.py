@@ -68,7 +68,7 @@ logs_base_path = "../../../logs/"
 
 experiments = [
                #("mnist", "mnist-64", "checkpoints/mnist/checkpoints", "classification", 40, 2000, 512, 64, 512),
-               ("div", "div", "checkpoints/division/checkpoints", "grokking", 1000, 50_000, 512, 512, 512),
+               ("div", "div", "checkpoints/division/checkpoints", "grokking", 1000, 3000, 512, 512, 512),
               #  ("div_mse", "div_mse", "checkpoints/division_mse/checkpoints", "grokking", 1000, 50_000, 512, 512, 512),
               #  ("s5", "s5", "checkpoints/s5/checkpoints", "grokking", 1000, 50_000, 512, 512, 512)
               ]
@@ -103,7 +103,7 @@ for experiment_name, experiment_json_file_name, experiment_path, experiment_type
   data = []
   for step in range(0, total_steps, step_distance):
 
-    print(f"Step: {(step // step_distance) + 1}/{total_steps // step_distance}")
+    print(f"Loading Data: {(step // step_distance) + 1}/{total_steps // step_distance}")
 
     state, train_loss, train_acc, test_loss, test_acc = eval_checkpoint(step, eval_checkpoint_batch_size, experiment_type, ds_train, ds_test, num_classes, mngr, feature_length)
     data.append(
@@ -128,6 +128,7 @@ for experiment_name, experiment_json_file_name, experiment_path, experiment_type
   df_acc = df_acc.melt("step", var_name="split", value_name="accuracy")
   df_acc["split"] = df_acc["split"].str.replace("_acc", "")
 
+  steps = df["step"].tolist() 
   training_loss = df_loss[df_loss["split"] == "train"]["loss"].tolist()
   test_loss = df_loss[df_loss["split"] == "test"]["loss"].tolist()
   training_acc = df_acc[df_acc["split"] == "train"]["accuracy"].tolist()
@@ -166,7 +167,7 @@ for experiment_name, experiment_json_file_name, experiment_path, experiment_type
 
     gc.collect()
 
-    print(f"Iteration: {i + 1}/{len(state_checkpoints)}")
+    print(f"Computing Results: {i + 1}/{len(state_checkpoints)}")
 
     state = state_checkpoints[i]
 
@@ -198,6 +199,7 @@ for experiment_name, experiment_json_file_name, experiment_path, experiment_type
 
   # Store results as a JSON file
   graph_data = {
+      "step": steps, 
       "training_loss": training_loss,
       "test_loss": test_loss,
       "training_acc": training_acc,
