@@ -7,6 +7,14 @@ from absl import app, flags, logging
 from datasets import Dataset
 from ml_collections import config_flags
 
+import sys
+from pathlib import Path
+
+current_directory = Path.cwd()
+
+if current_directory not in sys.path:
+    sys.path.insert(0, str(current_directory))
+
 from idiots.dataset.dataloader import DataLoader
 from idiots.experiments.grokking.training import (
     TrainState,

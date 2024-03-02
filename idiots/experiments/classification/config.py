@@ -4,7 +4,7 @@ from ml_collections import ConfigDict
 def get_config():
     config = ConfigDict()
 
-    config.log_dir = "logs/mnist"
+    config.log_dir = "logs/checkpoints/mnist"
 
     config.seed = 0
     config.loss_variant = "cross_entropy"
@@ -14,8 +14,8 @@ def get_config():
     config.eval_every = 1000
     config.save_every = -1
 
-    config.train_size = 60_000
-    config.test_size = 10_000
+    config.train_size = 10_000
+    config.test_size = 5_000
     config.train_batch_size = 128
     config.test_batch_size = 128
 

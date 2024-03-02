@@ -86,6 +86,7 @@ def dots(kernel_fn, params, x, batch_size: int = 32):
 
 
 def init_state_and_ds(config):
+    
     ds_train, ds_test = binary_op_splits(
         config.task, config.train_percentage, config.seed
     )
@@ -101,6 +102,20 @@ def init_state_and_ds(config):
     state = TrainState.create(apply_fn=model.apply, params=params, tx=tx)
     return state, ds_train, ds_test
 
+def init_state(config, training_data_example, num_classes, feature_length):
+    
+    model = TransformerSingleOutput(
+        d_model=config.model.d_model,
+        n_layers=config.model.n_layers,
+        n_heads=config.model.n_heads,
+        vocab_size=num_classes,
+        max_len=feature_length,
+    )
+    params = model.init(jax.random.PRNGKey(config.seed), training_data_example)
+    tx = get_optimizer("adamw", **config.opt)
+    state = TrainState.create(apply_fn=model.apply, params=params, tx=tx)
+    
+    return state
 
 def init(config):
     log_dir = next_dir(config.log_dir).absolute().resolve()
@@ -111,11 +126,11 @@ def init(config):
 
 
 def restore(
-    checkponit_dir: Path, step: int
+    checkpoint_dir: Path, step: int
 ) -> tuple[Any, TrainState, Dataset, Dataset]:
-    checkponit_dir = checkponit_dir.absolute().resolve()
+    checkpoint_dir = checkpoint_dir.absolute().resolve()
     mngr = ocp.CheckpointManager(
-        checkponit_dir,
+        checkpoint_dir,
         options=ocp.CheckpointManagerOptions(
             read_only=True, save_interval_steps=0, create=False
         ),
@@ -132,4 +147,20 @@ def restore(
         state = mngr.restore(step, args=ocp.args.StandardRestore(state))  # type: ignore
         assert isinstance(state, TrainState)
 
-    return config, state, ds_train, ds_test
+    return mngr, config, state, ds_train, ds_test
+
+def restore_partial(
+    mngr, step: int, training_data_example, num_classes: int, feature_length
+) -> tuple[Any, TrainState, Dataset, Dataset]:
+    # Load the config from the checkpoint, but add any new defaults
+    config = get_config()
+    override_config = ConfigDict(mngr.metadata())
+    config.update(override_config)
+
+    state = init_state(config, training_data_example, num_classes, feature_length)
+
+    if step > 0:
+        state = mngr.restore(step, args=ocp.args.StandardRestore(state))  # type: ignore
+        assert isinstance(state, TrainState)
+
+    return config, state
