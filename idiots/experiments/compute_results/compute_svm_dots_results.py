@@ -71,7 +71,7 @@ experiments = [
                #("mnist", "mnist-64", "checkpoints/mnist/checkpoints", "classification", 40, 2000, 512, 64, 512),
               #  ("div", "div-256", "checkpoints/division/exp21/checkpoints", "grokking", 1000, 50_000, 256, 256, 256),
               #  ("div_mse", "div_mse-256", "checkpoints/division_mse/exp22/checkpoints", "grokking", 1000, 50_000, 256, 256, 256),
-               ("s5", "s5-256-stratified", "checkpoints/s5/exp24/checkpoints", "grokking", 1000, 50_000, 256, 128, 256)
+               ("s5", "s5-256-stratified-1000", "checkpoints/s5/checkpoints", "grokking", 1000, 50_000, 256, 256, 256)
               ]
 
 for experiment_name, experiment_json_file_name, experiment_path, experiment_type, step_distance, total_steps, num_dots_samples, num_svm_training_samples, num_svm_test_samples in experiments:
