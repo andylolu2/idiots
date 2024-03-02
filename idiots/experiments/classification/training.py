@@ -26,6 +26,7 @@ def init_state_and_ds(config):
     state = TrainState.create(apply_fn=model.apply, params=params, tx=tx)
     return state, ds_train, ds_test
 
+
 def init_state(config, training_data_example, num_classes):
     model = ImageMLP(
         hidden=config.model.d_model,
@@ -37,6 +38,7 @@ def init_state(config, training_data_example, num_classes):
     state = TrainState.create(apply_fn=model.apply, params=params, tx=tx)
     return state
 
+
 def init(config):
     log_dir = next_dir(config.log_dir).absolute().resolve()
     writer = SummaryWriter(log_dir=str(log_dir))
@@ -47,7 +49,7 @@ def init(config):
 
 def restore(
     checkpoint_dir: Path, step: int
-) -> tuple[Any, TrainState, Dataset, Dataset]:
+) -> tuple[ocp.CheckpointManager, Any, TrainState, Dataset, Dataset]:
     checkpoint_dir = checkpoint_dir.absolute().resolve()
     mngr = ocp.CheckpointManager(
         checkpoint_dir,
@@ -69,9 +71,10 @@ def restore(
 
     return mngr, config, state, ds_train, ds_test
 
+
 def restore_partial(
-    mngr, step: int, training_data_example, num_classes: int  
-) -> tuple[Any, TrainState, Dataset, Dataset]:
+    mngr, step: int, training_data_example, num_classes: int
+) -> tuple[Any, TrainState]:
     # Load the config from the checkpoint, but add any new defaults
     config = get_config()
     override_config = ConfigDict(mngr.metadata())
