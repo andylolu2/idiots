@@ -28,9 +28,9 @@ warnings.filterwarnings('ignore')
 # --- Helper Functions ---
 
 
-def eval_checkpoint(step, batch_size, experiment_type, ds_train, ds_test, num_classes, mngr, feature_length):
+def eval_checkpoint(step, batch_size, experiment_type, ds_train, ds_test, num_classes, mngr):
   if experiment_type == "grokking":
-    config, state = grokking_restore_partial(mngr, step, ds_train["x"][:1], num_classes, feature_length)
+    config, state = grokking_restore_partial(mngr, step, ds_train["x"][:1], num_classes)
   elif experiment_type == "classification":
     config, state = classification_restore_partial(mngr, step, ds_train["x"][:1], num_classes)
   else:
@@ -99,7 +99,6 @@ for experiment_name, experiment_json_file_name, experiment_path, experiment_type
   Y_test = jnp.array(ds_test['y'])
 
   num_classes = ds_train.features["y"].num_classes
-  feature_length = ds_train.features["x"].length
 
   # Extract data from checkpoints
   data = []
@@ -107,7 +106,7 @@ for experiment_name, experiment_json_file_name, experiment_path, experiment_type
 
     print(f"Loading Data: {(step // step_distance) + 1}/{total_steps // step_distance}")
 
-    state, train_loss, train_acc, test_loss, test_acc = eval_checkpoint(step, eval_checkpoint_batch_size, experiment_type, ds_train, ds_test, num_classes, mngr, feature_length)
+    state, train_loss, train_acc, test_loss, test_acc = eval_checkpoint(step, eval_checkpoint_batch_size, experiment_type, ds_train, ds_test, num_classes, mngr)
     data.append(
         {
             "step": step,

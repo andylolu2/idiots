@@ -102,13 +102,13 @@ def init_state_and_ds(config):
     return state, ds_train, ds_test
 
 
-def init_state(config, training_data_example, num_classes, feature_length):
+def init_state(config, training_data_example, num_classes):
     model = TransformerSingleOutput(
         d_model=config.model.d_model,
         n_layers=config.model.n_layers,
         n_heads=config.model.n_heads,
         vocab_size=num_classes,
-        max_len=feature_length,
+        max_len=training_data_example.shape[1],
     )
     params = model.init(jax.random.PRNGKey(config.seed), training_data_example)
     tx = get_optimizer("adamw", **config.opt)
@@ -151,14 +151,14 @@ def restore(
 
 
 def restore_partial(
-    mngr, step: int, training_data_example, num_classes: int, feature_length
+    mngr, step: int, training_data_example, num_classes: int
 ) -> tuple[Any, TrainState]:
     # Load the config from the checkpoint, but add any new defaults
     config = get_config()
     override_config = ConfigDict(mngr.metadata())
     config.update(override_config)
 
-    state = init_state(config, training_data_example, num_classes, feature_length)
+    state = init_state(config, training_data_example, num_classes)
 
     if step > 0:
         state = mngr.restore(step, args=ocp.args.StandardRestore(state))  # type: ignore
