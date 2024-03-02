@@ -20,8 +20,10 @@ def init_state_and_ds(config):
         hidden=config.model.d_model,
         n_layers=config.model.n_layers,
         out=ds_train.features["y"].num_classes,
+        normalize_inputs=config.model.normalize_inputs,
     )
     params = model.init(jax.random.PRNGKey(config.seed), ds_train["x"][:1])
+    params = jax.tree_map(lambda x: x * config.model.init_scale, params)
     tx = get_optimizer(**config.opt)
     state = TrainState.create(apply_fn=model.apply, params=params, tx=tx)
     return state, ds_train, ds_test

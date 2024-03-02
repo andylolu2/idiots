@@ -25,6 +25,8 @@ def get_config():
     config.model = dict(
         d_model=256,
         n_layers=2,
+        init_scale=1.0,
+        normalize_inputs=False,
     )
 
     config.opt = dict(
