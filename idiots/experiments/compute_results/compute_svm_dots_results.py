@@ -149,7 +149,13 @@ for experiment_name, experiment_json_file_name, experiment_path, experiment_type
 
   # TO STRATIFY 
 
-  svm_X_train, svm_X_test, svm_Y_train, svm_Y_test = train_test_split(X_test, Y_test, test_size=num_svm_test_samples, stratify=Y_test)
+  # svm_X_train, svm_X_test, svm_Y_train, svm_Y_test = train_test_split(X_test, Y_test, test_size=num_svm_test_samples, stratify=Y_test)
+
+  svm_X_train = X_test[:num_svm_training_samples]
+  svm_Y_train = Y_test[:num_svm_training_samples]
+
+  svm_X_test = X_test[num_svm_training_samples:num_svm_training_samples+num_svm_test_samples]
+  svm_Y_test = Y_test[num_svm_training_samples:num_svm_training_samples+num_svm_test_samples]
 
   kernel_fn_trace = nt.empirical_kernel_fn(state.apply_fn,
                        vmap_axes=0,
