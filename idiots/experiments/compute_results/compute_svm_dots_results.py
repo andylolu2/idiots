@@ -17,6 +17,7 @@ import json
 import os
 import warnings
 import gc
+from sklearn.model_selection import train_test_split
 
 TEST_MODE = False 
 
@@ -68,9 +69,9 @@ logs_base_path = "/home/dc755/idiots/logs/"
 
 experiments = [
                #("mnist", "mnist-64", "checkpoints/mnist/checkpoints", "classification", 40, 2000, 512, 64, 512),
-               ("div", "div-256", "checkpoints/division/exp21/checkpoints", "grokking", 1000, 50_000, 256, 256, 256),
-               ("div_mse", "div_mse-256", "checkpoints/division_mse/exp22/checkpoints", "grokking", 1000, 50_000, 256, 256, 256),
-              #  ("s5", "s5-512", "checkpoints/s5/exp24/checkpoints", "grokking", 1000, 50_000, 512, 512, 512)
+              #  ("div", "div-256", "checkpoints/division/exp21/checkpoints", "grokking", 1000, 50_000, 256, 256, 256),
+              #  ("div_mse", "div_mse-256", "checkpoints/division_mse/exp22/checkpoints", "grokking", 1000, 50_000, 256, 256, 256),
+               ("s5", "s5-256-stratified", "checkpoints/s5/exp24/checkpoints", "grokking", 1000, 50_000, 256, 128, 256)
               ]
 
 for experiment_name, experiment_json_file_name, experiment_path, experiment_type, step_distance, total_steps, num_dots_samples, num_svm_training_samples, num_svm_test_samples in experiments:
@@ -148,20 +149,16 @@ for experiment_name, experiment_json_file_name, experiment_path, experiment_type
 
   # TO STRATIFY 
 
-  svm_X_train = X_test[:num_svm_training_samples]
-  svm_Y_train = Y_test[:num_svm_training_samples]
-
-  svm_X_test = X_test[num_svm_training_samples:num_svm_training_samples+num_svm_test_samples]
-  svm_Y_test = Y_test[num_svm_training_samples:num_svm_training_samples+num_svm_test_samples]
+  svm_X_train, svm_X_test, svm_Y_train, svm_Y_test = train_test_split(X_test, Y_test, test_size=num_svm_test_samples, stratify=Y_test)
 
   kernel_fn_trace = nt.empirical_kernel_fn(state.apply_fn,
-                                           vmap_axes=0,
-                                           trace_axes=(),
-                                           implementation=nt.NtkImplementation.STRUCTURED_DERIVATIVES,)
+                       vmap_axes=0,
+                       trace_axes=(),
+                       implementation=nt.NtkImplementation.STRUCTURED_DERIVATIVES,)
 
   kernel_fn = nt.empirical_kernel_fn(state.apply_fn,
-                                     vmap_axes=0,
-                                     implementation=nt.NtkImplementation.STRUCTURED_DERIVATIVES,)
+                     vmap_axes=0,
+                     implementation=nt.NtkImplementation.STRUCTURED_DERIVATIVES,)
   
   @jax.jit 
   def calculate_kernel_rank(kernel_trace):
