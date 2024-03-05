@@ -68,12 +68,6 @@ logs_base_path = "/home/dc755/idiots/logs/"
 # total_steps = value of the highest checkpoint
 
 experiments = [
-               #("mnist", "mnist-64", "checkpoints/mnist/checkpoints", "classification", 40, 2000, 512, 64, 512),
-              #  ("div", "div-256", "checkpoints/division/exp21/checkpoints", "grokking", 1000, 50_000, 256, 256, 256),
-              #  ("div_mse", "div_mse-256", "checkpoints/division_mse/exp22/checkpoints", "grokking", 1000, 50_000, 256, 256, 256),
-              #  ("s5", "s5-256-stratified-1000", "checkpoints/s5/checkpoints", "grokking", 1000, 50_000, 256, 256, 256)
-              # ("mnist_grokking", "mnist_grokking", "checkpoints/mnist_grokking/checkpoints", "classification", 1000, 100_000, 256, 256, 256)
-  # ("mnist_grokking", "mnist_grokking-exp44", "checkpoints/mnist_grokking/exp44/checkpoints", "classification", 1000, 3000, 512, 64, 512)
               ("mnist_grokking", "mnist_grokking-exp44", "checkpoints/mnist/exp44/checkpoints", "classification", 1000, 3000, 512, 64, 512),
               ("mnist_grokking", "mnist_grokking-exp45", "checkpoints/mnist/exp45/checkpoints", "classification", 1000, 3000, 512, 64, 512),
               ("mnist_grokking", "mnist_grokking-exp46", "checkpoints/mnist/exp46/checkpoints", "classification", 1000, 3000, 512, 64, 512),
@@ -176,12 +170,6 @@ for experiment_name, experiment_json_file_name, experiment_path, experiment_type
   
   @jax.jit 
   def calculate_kernel_rank(kernel_trace, eps=1e-5):
-    # add eps * ID 
-    # eig value decomp 
-    # threshold centre matrix  
-    #   if diagonal < eps : zero it 
-    # count number of non-zero eigen values remaining 
-    # return this 
     return jnp.linalg.matrix_rank(kernel_trace, tol=eps)
 
   for i in range(len(state_checkpoints)):
