@@ -12,6 +12,8 @@ from idiots.utils import metrics
 import neural_tangents as nt
 from einops import rearrange
 from sklearn.svm import SVC
+from sklearn.gaussian_process.kernels import StationaryKernelMixin, NormalizedKernelMixin, Kernel
+from sklearn.gaussian_process import GaussianProcessClassifier
 from sklearn.metrics import accuracy_score
 import json
 import os
@@ -20,6 +22,7 @@ import gc
 from sklearn.model_selection import train_test_split
 
 TEST_MODE = False 
+ADD_KERNEL = False 
 
 os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
 
@@ -56,11 +59,20 @@ def eval_checkpoint(step, batch_size, experiment_type, ds_train, ds_test, num_cl
 
   return state, train_loss, train_acc, test_loss, test_acc
 
+### --- Define GP kernel --- 
+
+class CustomKernel(StationaryKernelMixin, NormalizedKernelMixin, Kernel):
+    def __init__(self, kernel_fn):
+        self.kernel_fn = kernel_fn
+        super().__init__()
+
+    def __call__(self, X, Y=None, eval_gradient=False):
+        return self.kernel_fn(X, Y)
 
 # --- Main Loop ---
 
 
-logs_base_path = "/home/dc755/idiots/logs/"
+logs_base_path = "/home/dm894/idiots/logs/"
 
 # In form (experiment_name, experiment_checkpoint_path, experiment_type, step_distance, total_steps, num_dots_samples, num_svm_training_samples, num_svm_test_samples)
 
@@ -68,13 +80,7 @@ logs_base_path = "/home/dc755/idiots/logs/"
 # total_steps = value of the highest checkpoint
 
 experiments = [
-              ("mnist_grokking", "mnist_grokking-exp44", "checkpoints/mnist/exp44/checkpoints", "classification", 1000, 3000, 512, 64, 512),
-              ("mnist_grokking", "mnist_grokking-exp45", "checkpoints/mnist/exp45/checkpoints", "classification", 1000, 3000, 512, 64, 512),
-              ("mnist_grokking", "mnist_grokking-exp46", "checkpoints/mnist/exp46/checkpoints", "classification", 1000, 3000, 512, 64, 512),
-              ("mnist_grokking", "mnist_grokking-exp47", "checkpoints/mnist/exp47/checkpoints", "classification", 1000, 3000, 512, 64, 512),
-              ("mnist_grokking", "mnist_grokking-exp48", "checkpoints/mnist/exp48/checkpoints", "classification", 1000, 3000, 512, 64, 512),
-              ("mnist_grokking", "mnist_grokking-exp49", "checkpoints/mnist/exp49/checkpoints", "classification", 1000, 3000, 512, 64, 512),
-              ("mnist_grokking", "mnist_grokking-exp50", "checkpoints/mnist/exp50/checkpoints", "classification", 1000, 3000, 512, 64, 512),
+              ("division", "division", "checkpoints/division/checkpoints", "grokking", 1000, 10_000, 256, 64, 256),
               ]
 
 for experiment_name, experiment_json_file_name, experiment_path, experiment_type, step_distance, total_steps, num_dots_samples, num_svm_training_samples, num_svm_test_samples in experiments:
@@ -142,14 +148,14 @@ for experiment_name, experiment_json_file_name, experiment_path, experiment_type
 
   # Compute SVM accuracy, dots and kernels from each recorded checkpoint
   svm_accuracy = []
+  gp_accuracy = []
   dots_results = []
   computed_kernels = []
+  kernel_alignments = []
 
   batch_size = 32
 
   dots_X = X_test[:num_dots_samples]
-
-  # TO STRATIFY 
 
   # svm_X_train, svm_X_test, svm_Y_train, svm_Y_test = train_test_split(X_test, Y_test, test_size=num_svm_test_samples, stratify=Y_test)
 
@@ -186,13 +192,13 @@ for experiment_name, experiment_json_file_name, experiment_path, experiment_type
     kernel_trace = kernel_fn_trace_batched(dots_X, None, "ntk", state.params)
     kernel_trace = rearrange(kernel_trace, "b1 b2 d1 d2 -> (b1 d1) (b2 d2)")
     kernel_rank = calculate_kernel_rank(kernel_trace)
+    print(kernel_rank.item())
     dots_results.append(kernel_rank.item())
-
-    # dots_results.append(jnp.linalg.matrix_rank(kernel_trace).item())
 
     kernel_fn_batched = nt.batch(kernel_fn, device_count=-1, batch_size=batch_size)
     kernel = kernel_fn_batched(dots_X, None, "ntk", state.params)
-    computed_kernels.append(kernel.tolist())
+    if ADD_KERNEL: 
+      computed_kernels.append(kernel.tolist())
 
     # Compute SVM accuracy
 
@@ -210,6 +216,29 @@ for experiment_name, experiment_json_file_name, experiment_path, experiment_type
 
     svm_accuracy.append(accuracy)
 
+    # Compute GP accuracy 
+
+    custom_gp_kernel = CustomKernel(kernel_fn=custom_kernel)
+
+    if ADD_KERNEL:
+      svm_X_train = rearrange(svm_X_train, 'b h w -> b (h w)')
+      svm_X_test = rearrange(svm_X_test, 'b h w -> b (h w)')
+
+    gaussian_process_classifier = GaussianProcessClassifier(kernel=custom_gp_kernel)
+    gaussian_process_classifier.fit(svm_X_train, svm_Y_train)
+
+    predictions = gaussian_process_classifier.predict(svm_X_test)
+
+    accuracy = accuracy_score(svm_Y_test, predictions)
+
+    gp_accuracy.append(accuracy)
+
+    # Compute kernel alignment 
+
+    kernel_alignment = (svm_Y_test.T @ kernel @ svm_Y_test) / (jnp.linalg.norm(kernel) * jnp.linalg.norm(svm_Y_test))
+
+    kernel_alignments.append(kernel_alignment.item())
+
   print("Storing Results...")
 
   # Store results as a JSON file
@@ -220,9 +249,13 @@ for experiment_name, experiment_json_file_name, experiment_path, experiment_type
       "training_acc": training_acc,
       "test_acc": test_acc,
       "svm_accuracy": svm_accuracy,
+      "gp_accuracy": gp_accuracy,
       "dots": dots_results,
-      "kernel": computed_kernels,
+      "kernel_alignment": kernel_alignments,
   }
+
+  if ADD_KERNEL:
+    graph_data["kernels"] = computed_kernels 
 
   json_data = json.dumps(graph_data, indent=2)
 
