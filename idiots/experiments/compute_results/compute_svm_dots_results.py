@@ -164,8 +164,14 @@ for experiment_name, experiment_json_file_name, experiment_path, experiment_type
                                      implementation=nt.NtkImplementation.STRUCTURED_DERIVATIVES,)
   
   @jax.jit 
-  def calculate_kernel_rank(kernel_trace):
-    return jnp.linalg.matrix_rank(kernel_trace)
+  def calculate_kernel_rank(kernel_trace, eps=1e-5):
+    # add eps * ID 
+    # eig value decomp 
+    # threshold centre matrix  
+    #   if diagonal < eps : zero it 
+    # count number of non-zero eigen values remaining 
+    # return this 
+    return jnp.linalg.matrix_rank(kernel_trace, tol=eps)
 
   for i in range(len(state_checkpoints)):
 
@@ -205,7 +211,7 @@ for experiment_name, experiment_json_file_name, experiment_path, experiment_type
 
     svm_accuracy.append(accuracy)
 
-  print("Storing Results")
+  print("Storing Results...")
 
   # Store results as a JSON file
   graph_data = {
