@@ -33,9 +33,11 @@ def init_state(config, training_data_example, num_classes):
     model = ImageMLP(
         hidden=config.model.d_model,
         n_layers=config.model.n_layers,
+        normalize_inputs=config.model.normalize_inputs,
         out=num_classes,
     )
     params = model.init(jax.random.PRNGKey(config.seed), training_data_example)
+    params = jax.tree_map(lambda x: x * config.model.init_scale, params)
     tx = get_optimizer(**config.opt)
     state = TrainState.create(apply_fn=model.apply, params=params, tx=tx)
     return state
