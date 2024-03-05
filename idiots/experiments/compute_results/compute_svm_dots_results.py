@@ -17,6 +17,7 @@ import json
 import os
 import warnings
 import gc
+from sklearn.model_selection import train_test_split
 
 TEST_MODE = False 
 
@@ -27,9 +28,9 @@ warnings.filterwarnings('ignore')
 # --- Helper Functions ---
 
 
-def eval_checkpoint(step, batch_size, experiment_type, ds_train, ds_test, num_classes, mngr, feature_length):
+def eval_checkpoint(step, batch_size, experiment_type, ds_train, ds_test, num_classes, mngr):
   if experiment_type == "grokking":
-    config, state = grokking_restore_partial(mngr, step, ds_train["x"][:1], num_classes, feature_length)
+    config, state = grokking_restore_partial(mngr, step, ds_train["x"][:1], num_classes)
   elif experiment_type == "classification":
     config, state = classification_restore_partial(mngr, step, ds_train["x"][:1], num_classes)
   else:
@@ -59,7 +60,7 @@ def eval_checkpoint(step, batch_size, experiment_type, ds_train, ds_test, num_cl
 # --- Main Loop ---
 
 
-logs_base_path = "../../../logs/"
+logs_base_path = "/home/dc755/idiots/logs/"
 
 # In form (experiment_name, experiment_checkpoint_path, experiment_type, step_distance, total_steps, num_dots_samples, num_svm_training_samples, num_svm_test_samples)
 
@@ -68,9 +69,18 @@ logs_base_path = "../../../logs/"
 
 experiments = [
                #("mnist", "mnist-64", "checkpoints/mnist/checkpoints", "classification", 40, 2000, 512, 64, 512),
-               ("div", "div", "checkpoints/division/checkpoints", "grokking", 1000, 50_000, 256, 256, 256),
-              #  ("div_mse", "div_mse", "checkpoints/division_mse/checkpoints", "grokking", 1000, 50_000, 512, 512, 512),
-              #  ("s5", "s5", "checkpoints/s5/checkpoints", "grokking", 1000, 50_000, 512, 512, 512)
+              #  ("div", "div-256", "checkpoints/division/exp21/checkpoints", "grokking", 1000, 50_000, 256, 256, 256),
+              #  ("div_mse", "div_mse-256", "checkpoints/division_mse/exp22/checkpoints", "grokking", 1000, 50_000, 256, 256, 256),
+              #  ("s5", "s5-256-stratified-1000", "checkpoints/s5/checkpoints", "grokking", 1000, 50_000, 256, 256, 256)
+              # ("mnist_grokking", "mnist_grokking", "checkpoints/mnist_grokking/checkpoints", "classification", 1000, 100_000, 256, 256, 256)
+  # ("mnist_grokking", "mnist_grokking-exp44", "checkpoints/mnist_grokking/exp44/checkpoints", "classification", 1000, 3000, 512, 64, 512)
+              ("mnist_grokking", "mnist_grokking-exp44", "checkpoints/mnist/exp44/checkpoints", "classification", 1000, 3000, 512, 64, 512),
+              ("mnist_grokking", "mnist_grokking-exp45", "checkpoints/mnist/exp45/checkpoints", "classification", 1000, 3000, 512, 64, 512),
+              ("mnist_grokking", "mnist_grokking-exp46", "checkpoints/mnist/exp46/checkpoints", "classification", 1000, 3000, 512, 64, 512),
+              ("mnist_grokking", "mnist_grokking-exp47", "checkpoints/mnist/exp47/checkpoints", "classification", 1000, 3000, 512, 64, 512),
+              ("mnist_grokking", "mnist_grokking-exp48", "checkpoints/mnist/exp48/checkpoints", "classification", 1000, 3000, 512, 64, 512),
+              ("mnist_grokking", "mnist_grokking-exp49", "checkpoints/mnist/exp49/checkpoints", "classification", 1000, 3000, 512, 64, 512),
+              ("mnist_grokking", "mnist_grokking-exp50", "checkpoints/mnist/exp50/checkpoints", "classification", 1000, 3000, 512, 64, 512),
               ]
 
 for experiment_name, experiment_json_file_name, experiment_path, experiment_type, step_distance, total_steps, num_dots_samples, num_svm_training_samples, num_svm_test_samples in experiments:
@@ -97,7 +107,6 @@ for experiment_name, experiment_json_file_name, experiment_path, experiment_type
   Y_test = jnp.array(ds_test['y'])
 
   num_classes = ds_train.features["y"].num_classes
-  feature_length = ds_train.features["x"].length
 
   # Extract data from checkpoints
   data = []
@@ -105,7 +114,7 @@ for experiment_name, experiment_json_file_name, experiment_path, experiment_type
 
     print(f"Loading Data: {(step // step_distance) + 1}/{total_steps // step_distance}")
 
-    state, train_loss, train_acc, test_loss, test_acc = eval_checkpoint(step, eval_checkpoint_batch_size, experiment_type, ds_train, ds_test, num_classes, mngr, feature_length)
+    state, train_loss, train_acc, test_loss, test_acc = eval_checkpoint(step, eval_checkpoint_batch_size, experiment_type, ds_train, ds_test, num_classes, mngr)
     data.append(
         {
             "step": step,
@@ -148,6 +157,8 @@ for experiment_name, experiment_json_file_name, experiment_path, experiment_type
 
   # TO STRATIFY 
 
+  # svm_X_train, svm_X_test, svm_Y_train, svm_Y_test = train_test_split(X_test, Y_test, test_size=num_svm_test_samples, stratify=Y_test)
+
   svm_X_train = X_test[:num_svm_training_samples]
   svm_Y_train = Y_test[:num_svm_training_samples]
 
@@ -155,13 +166,13 @@ for experiment_name, experiment_json_file_name, experiment_path, experiment_type
   svm_Y_test = Y_test[num_svm_training_samples:num_svm_training_samples+num_svm_test_samples]
 
   kernel_fn_trace = nt.empirical_kernel_fn(state.apply_fn,
-                                           vmap_axes=0,
-                                           trace_axes=(),
-                                           implementation=nt.NtkImplementation.STRUCTURED_DERIVATIVES,)
+                       vmap_axes=0,
+                       trace_axes=(),
+                       implementation=nt.NtkImplementation.STRUCTURED_DERIVATIVES,)
 
   kernel_fn = nt.empirical_kernel_fn(state.apply_fn,
-                                     vmap_axes=0,
-                                     implementation=nt.NtkImplementation.STRUCTURED_DERIVATIVES,)
+                     vmap_axes=0,
+                     implementation=nt.NtkImplementation.STRUCTURED_DERIVATIVES,)
   
   @jax.jit 
   def calculate_kernel_rank(kernel_trace, eps=1e-5):

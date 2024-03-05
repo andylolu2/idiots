@@ -20,22 +20,28 @@ def init_state_and_ds(config):
         hidden=config.model.d_model,
         n_layers=config.model.n_layers,
         out=ds_train.features["y"].num_classes,
+        normalize_inputs=config.model.normalize_inputs,
     )
     params = model.init(jax.random.PRNGKey(config.seed), ds_train["x"][:1])
+    params = jax.tree_map(lambda x: x * config.model.init_scale, params)
     tx = get_optimizer(**config.opt)
     state = TrainState.create(apply_fn=model.apply, params=params, tx=tx)
     return state, ds_train, ds_test
+
 
 def init_state(config, training_data_example, num_classes):
     model = ImageMLP(
         hidden=config.model.d_model,
         n_layers=config.model.n_layers,
+        normalize_inputs=config.model.normalize_inputs,
         out=num_classes,
     )
     params = model.init(jax.random.PRNGKey(config.seed), training_data_example)
+    params = jax.tree_map(lambda x: x * config.model.init_scale, params)
     tx = get_optimizer(**config.opt)
     state = TrainState.create(apply_fn=model.apply, params=params, tx=tx)
     return state
+
 
 def init(config):
     log_dir = next_dir(config.log_dir).absolute().resolve()
@@ -47,7 +53,7 @@ def init(config):
 
 def restore(
     checkpoint_dir: Path, step: int
-) -> tuple[Any, TrainState, Dataset, Dataset]:
+) -> tuple[ocp.CheckpointManager, Any, TrainState, Dataset, Dataset]:
     checkpoint_dir = checkpoint_dir.absolute().resolve()
     mngr = ocp.CheckpointManager(
         checkpoint_dir,
@@ -69,9 +75,10 @@ def restore(
 
     return mngr, config, state, ds_train, ds_test
 
+
 def restore_partial(
-    mngr, step: int, training_data_example, num_classes: int  
-) -> tuple[Any, TrainState, Dataset, Dataset]:
+    mngr, step: int, training_data_example, num_classes: int
+) -> tuple[Any, TrainState]:
     # Load the config from the checkpoint, but add any new defaults
     config = get_config()
     override_config = ConfigDict(mngr.metadata())

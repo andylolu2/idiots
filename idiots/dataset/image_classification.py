@@ -22,6 +22,8 @@ def mnist_splits(train_size: int, test_size: int, seed: int = 0):
 if __name__ == "__main__":
     from time import perf_counter
 
+    import numpy as np
+
     from idiots.dataset.dataloader import DataLoader
 
     ds_train, ds_test = mnist_splits(60000, 10000)
@@ -29,6 +31,7 @@ if __name__ == "__main__":
     for item in DataLoader(ds_train, 32):
         print(item["x"].shape, item["y"].shape)
         print(item["x"].dtype, item["y"].dtype)
+        print(np.min(item["x"]), np.max(item["x"]))
         break
 
     # Performance test
