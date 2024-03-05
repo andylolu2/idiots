@@ -72,7 +72,15 @@ experiments = [
               #  ("div", "div-256", "checkpoints/division/exp21/checkpoints", "grokking", 1000, 50_000, 256, 256, 256),
               #  ("div_mse", "div_mse-256", "checkpoints/division_mse/exp22/checkpoints", "grokking", 1000, 50_000, 256, 256, 256),
               #  ("s5", "s5-256-stratified-1000", "checkpoints/s5/checkpoints", "grokking", 1000, 50_000, 256, 256, 256)
-              ("mnist_grokking", "mnist_grokking", "checkpoints/mnist_grokking/checkpoints", "classification", 1000, 100_000, 256, 256, 256)
+              # ("mnist_grokking", "mnist_grokking", "checkpoints/mnist_grokking/checkpoints", "classification", 1000, 100_000, 256, 256, 256)
+  # ("mnist_grokking", "mnist_grokking-exp44", "checkpoints/mnist_grokking/exp44/checkpoints", "classification", 1000, 3000, 512, 64, 512)
+              ("mnist_grokking", "mnist_grokking-exp44", "checkpoints/mnist/exp44/checkpoints", "classification", 1000, 3000, 512, 64, 512),
+              ("mnist_grokking", "mnist_grokking-exp45", "checkpoints/mnist/exp45/checkpoints", "classification", 1000, 3000, 512, 64, 512),
+              ("mnist_grokking", "mnist_grokking-exp46", "checkpoints/mnist/exp46/checkpoints", "classification", 1000, 3000, 512, 64, 512),
+              ("mnist_grokking", "mnist_grokking-exp47", "checkpoints/mnist/exp47/checkpoints", "classification", 1000, 3000, 512, 64, 512),
+              ("mnist_grokking", "mnist_grokking-exp48", "checkpoints/mnist/exp48/checkpoints", "classification", 1000, 3000, 512, 64, 512),
+              ("mnist_grokking", "mnist_grokking-exp49", "checkpoints/mnist/exp49/checkpoints", "classification", 1000, 3000, 512, 64, 512),
+              ("mnist_grokking", "mnist_grokking-exp50", "checkpoints/mnist/exp50/checkpoints", "classification", 1000, 3000, 512, 64, 512),
               ]
 
 for experiment_name, experiment_json_file_name, experiment_path, experiment_type, step_distance, total_steps, num_dots_samples, num_svm_training_samples, num_svm_test_samples in experiments:
