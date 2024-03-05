@@ -72,7 +72,16 @@ experiments = [
               #  ("div", "div-256", "checkpoints/division/exp21/checkpoints", "grokking", 1000, 50_000, 256, 256, 256),
               #  ("div_mse", "div_mse-256", "checkpoints/division_mse/exp22/checkpoints", "grokking", 1000, 50_000, 256, 256, 256),
               #  ("s5", "s5-256-stratified-1000", "checkpoints/s5/checkpoints", "grokking", 1000, 50_000, 256, 256, 256)
-              ("mnist_grokking", "mnist_grokking", "checkpoints/mnist_grokking/checkpoints", "classification", 1000, 100_000, 256, 256, 256)
+              # ("mnist_grokking", "mnist_grokking", "checkpoints/mnist_grokking/checkpoints", "classification", 1000, 100_000, 512, 64, 512)
+               # ("mnist_grokking", "mnist_grokking-800", "checkpoints/mnist/exp29/checkpoints", "classification", 1000, 1000, 512, 64, 512) 
+              ("mnist_grokking", "mnist_grokking-init01", "checkpoints/mnist/exp37/checkpoints", "classification", 1000, 3000, 512, 64, 512),
+              ("mnist_grokking", "mnist_grokking-exp37", "checkpoints/mnist/exp37/checkpoints", "classification", 1000, 3000, 512, 64, 512),
+              ("mnist_grokking", "mnist_grokking-exp38", "checkpoints/mnist/exp38/checkpoints", "classification", 1000, 3000, 512, 64, 512),
+              ("mnist_grokking", "mnist_grokking-exp39", "checkpoints/mnist/exp39/checkpoints", "classification", 1000, 3000, 512, 64, 512),
+              ("mnist_grokking", "mnist_grokking-exp40", "checkpoints/mnist/exp40/checkpoints", "classification", 1000, 3000, 512, 64, 512),
+              ("mnist_grokking", "mnist_grokking-exp41", "checkpoints/mnist/exp41/checkpoints", "classification", 1000, 3000, 512, 64, 512),
+              ("mnist_grokking", "mnist_grokking-exp42", "checkpoints/mnist/exp42/checkpoints", "classification", 1000, 3000, 512, 64, 512),
+              ("mnist_grokking", "mnist_grokking-exp43", "checkpoints/mnist/exp43/checkpoints", "classification", 1000, 3000, 512, 64, 512)
               ]
 
 for experiment_name, experiment_json_file_name, experiment_path, experiment_type, step_distance, total_steps, num_dots_samples, num_svm_training_samples, num_svm_test_samples in experiments:
@@ -103,7 +112,7 @@ for experiment_name, experiment_json_file_name, experiment_path, experiment_type
   # Extract data from checkpoints
   data = []
   for step in range(0, total_steps, step_distance):
-
+    print(step)
     print(f"Loading Data: {(step // step_distance) + 1}/{total_steps // step_distance}")
 
     state, train_loss, train_acc, test_loss, test_acc = eval_checkpoint(step, eval_checkpoint_batch_size, experiment_type, ds_train, ds_test, num_classes, mngr)
