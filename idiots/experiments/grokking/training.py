@@ -52,7 +52,13 @@ def train_step(state: TrainState, batch, loss_variant: str) -> tuple[TrainState,
         params=new_params,
         opt_state=new_opt_state,
     )
-    logs = {"loss": losses, "accuracy": acc}
+    logs = {
+        "loss": losses,
+        "accuracy": acc,
+        "grad_norm": optax.global_norm(grads),
+        "update_norm": optax.global_norm(updates),
+        "weight_norm": optax.global_norm(state.params),
+    }
     return new_state, logs
 
 
@@ -97,7 +103,7 @@ def init_state_and_ds(config):
         max_len=ds_train.features["x"].length,
     )
     params = model.init(jax.random.PRNGKey(config.seed), ds_train["x"][:1])
-    tx = get_optimizer("adamw", **config.opt)
+    tx = get_optimizer(**config.opt)
     state = TrainState.create(apply_fn=model.apply, params=params, tx=tx)
     return state, ds_train, ds_test
 
@@ -111,7 +117,7 @@ def init_state(config, training_data_example, num_classes):
         max_len=training_data_example.shape[1],
     )
     params = model.init(jax.random.PRNGKey(config.seed), training_data_example)
-    tx = get_optimizer("adamw", **config.opt)
+    tx = get_optimizer(**config.opt)
     state = TrainState.create(apply_fn=model.apply, params=params, tx=tx)
 
     return state
