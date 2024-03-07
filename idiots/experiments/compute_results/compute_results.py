@@ -13,11 +13,13 @@ from einops import rearrange
 from sklearn.svm import SVC
 from sklearn.gaussian_process.kernels import StationaryKernelMixin, NormalizedKernelMixin, Kernel, RBF
 from sklearn.gaussian_process import GaussianProcessRegressor
+from sklearn.preprocessing import OneHotEncoder
 from sklearn.metrics import accuracy_score
 import json
 import os
 import warnings
 import gc
+from functools import partial
 
 os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
 
@@ -123,7 +125,6 @@ def generate_kernel_and_analysis_datasets(X_test, Y_test, num_kernel_samples, nu
   return kernel_X, analysis_X_train, analysis_Y_train, analysis_X_test, analysis_Y_test
 
 # Return a batched kernel function where trace_axes=() [for calculating DOTS]
-@jax.jit
 def compute_kernel_trace_axes_fn(transformer_state_apply_fn): 
   kernel_fn_trace_axes = nt.empirical_kernel_fn(transformer_state_apply_fn,
                        vmap_axes=0,
@@ -132,7 +133,6 @@ def compute_kernel_trace_axes_fn(transformer_state_apply_fn):
   return kernel_fn_trace_axes
 
 # Return a batched kernel function where trace_axes is not defined [for computing everything other than DOTS]
-@jax.jit
 def compute_kernel_fn(transformer_state_apply_fn):
   kernel_fn = nt.empirical_kernel_fn(transformer_state_apply_fn,
                      vmap_axes=0,
@@ -140,7 +140,6 @@ def compute_kernel_fn(transformer_state_apply_fn):
   return kernel_fn 
 
 # Apply the kernel_trace_axes_fn to the values X with given transformer_state_params
-@jax.jit(static_argnums=(2,3))
 def compute_kernel_trace_axes(kernel_trace_axes_fn, transformer_state_params, X, batch_size):
   kernel_trace_axes_fn_batched = nt.batch(kernel_trace_axes_fn, device_count=-1, batch_size=batch_size)
   kernel_trace_axes = kernel_trace_axes_fn_batched(X, None, "ntk", transformer_state_params)
@@ -148,14 +147,12 @@ def compute_kernel_trace_axes(kernel_trace_axes_fn, transformer_state_params, X,
   return kernel_trace_axes
 
 # Apply the kernel_fn to the values X with given transformer_state_params 
-@jax.jit(static_argnums=(2,3))
 def compute_kernel(kernel_fn, transformer_state_params, X, batch_size):
   kernel_fn_batched = nt.batch(kernel_fn, device_count=-1, batch_size=batch_size)
   kernel = kernel_fn_batched(X, None, "ntk", transformer_state_params)
   return kernel 
 
 # Compute DOTS on the kernel_trace_axes matrix 
-@jax.jit
 def compute_dots(kernel_trace_axes):
     kernel_rank = jax.jit(jnp.linalg.matrix_rank)(kernel_trace_axes)
     return kernel_rank.item()
@@ -173,16 +170,28 @@ def compute_svm_accuracy(custom_kernel_fn, analysis_X_train, analysis_Y_train, a
   return accuracy
 
 # Given the a custom kernel and training/test data, compute the accuracy of a Gaussian Process
-def compute_gp_accuracy(custom_kernel_fn, analysis_X_train, analysis_Y_train, analysis_X_test, analysis_Y_test): 
+def compute_gp_accuracy(custom_kernel_fn, analysis_X_train, analysis_Y_train, analysis_X_test, analysis_Y_test, num_y_classes): 
+  
+  analysis_Y_train_one_hot = jax.nn.one_hot(analysis_Y_train, num_y_classes)
+  
+  print(analysis_Y_train.shape)
+  print(analysis_Y_train_one_hot.shape)
+
   custom_gp_kernel = RBF(length_scale=1e7) # CustomKernel(kernel_fn=custom_kernel)
   gaussian_process_classifier = GaussianProcessRegressor(kernel=custom_gp_kernel)
-  gaussian_process_classifier.fit(analysis_X_train, analysis_Y_train)
-  predictions = gaussian_process_classifier.predict(analysis_X_test)
+  gaussian_process_classifier.fit(analysis_X_train, analysis_Y_train_one_hot)
+
+  print(gaussian_process_classifier.predict(analysis_X_test))
+  print(gaussian_process_classifier.predict(analysis_X_test).shape)
+
+  predictions = gaussian_process_classifier.predict(analysis_X_test).argmax(axis=-1)
+
+  print(accuracy_score(analysis_Y_test, predictions))
+
   accuracy = accuracy_score(analysis_Y_test, predictions)
   return accuracy 
 
 # Compute the kernel alignment metric (Shan 2022: A Theory of Neural Tangent Kernel Alignment and Its Influence on Training)
-@jax.jit
 def compute_kernel_alignment(kernel, analysis_Y_test):
   kernel_alignment = (analysis_Y_test.T @ kernel @ analysis_Y_test) / (jnp.linalg.norm(kernel) * jnp.linalg.norm(analysis_Y_test))
   return kernel_alignment.item()
@@ -281,7 +290,7 @@ def compute_results(logs_base_path, experiments, add_kernel, kernel_batch_size=3
       computed_kernels.append(kernel.tolist())
       dots_results.append(compute_dots(kernel_trace_axes))
       svm_accuracy.append(compute_svm_accuracy(custom_kernel_fn, analysis_X_train, analysis_Y_train, analysis_X_test, analysis_Y_test))
-      gp_accuracy.append(compute_gp_accuracy(custom_kernel_fn, analysis_X_train, analysis_Y_train, analysis_X_test, analysis_Y_test))
+      gp_accuracy.append(compute_gp_accuracy(custom_kernel_fn, analysis_X_train, analysis_Y_train, analysis_X_test, analysis_Y_test, num_y_classes))
       kernel_alignments.append(compute_kernel_alignment(kernel, analysis_Y_test))
 
     print("Storing Results...")
@@ -293,7 +302,7 @@ if __name__ == "__main__":
   logs_base_path = "/home/dm894/idiots/logs/"
 
   experiments = [
-                ("mnist", "mnist-slower", "checkpoints/mnist-slower/checkpoints", "mnist", 10_000, 100_000, 256, 256, 256),
+                ("mnist", "mnist-slower", "checkpoints/mnist-slower/checkpoints", "mnist", 10_000, 20_000, 256, 256, 256),
                 ]
 
   compute_results(logs_base_path, experiments, add_kernel=False)
