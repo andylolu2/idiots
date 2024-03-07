@@ -1,4 +1,6 @@
 import random
+import sys
+from pathlib import Path
 
 import jax.numpy as jnp
 import neural_tangents as nt
@@ -6,9 +8,6 @@ import orbax.checkpoint as ocp
 from absl import app, flags, logging
 from datasets import Dataset
 from ml_collections import config_flags
-
-import sys
-from pathlib import Path
 
 current_directory = Path.cwd()
 
@@ -58,11 +57,25 @@ def main(_):
         metrics.log(**logs)
 
         if state.step % config.log_every == 0 and config.log_every > 0:
-            [losses, accuracies] = metrics.collect("loss", "accuracy")
+            [
+                losses,
+                accuracies,
+                grad_norms,
+                weight_norms,
+                update_norms,
+            ] = metrics.collect(
+                "loss", "accuracy", "grad_norm", "weight_norm", "update_norm"
+            )
             loss = jnp.concatenate(losses).mean().item()
             acc = jnp.concatenate(accuracies).mean().item()
+            grad_norm = jnp.array(grad_norms).mean().item()
+            weight_norm = jnp.array(weight_norms).mean().item()
+            update_norm = jnp.array(update_norms).mean().item()
             writer.add_scalar("train/loss", loss, state.step)
             writer.add_scalar("train/accuracy", acc, state.step)
+            writer.add_scalar("train/grad_norm", grad_norm, state.step)
+            writer.add_scalar("train/weight_norm", weight_norm, state.step)
+            writer.add_scalar("train/update_norm", update_norm, state.step)
 
         if state.step % config.eval_every == 0 and config.eval_every > 0:
             for batch in DataLoader(ds_test, config.test_batch_size):
