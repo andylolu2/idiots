@@ -29,6 +29,7 @@ class CustomKernel(StationaryKernelMixin, NormalizedKernelMixin, Kernel):
         self.kernel_fn = kernel_fn
         super().__init__()
 
+    @jax.jit
     def __call__(self, X, Y=None):
         return self.kernel_fn(X, Y)
     
@@ -122,6 +123,7 @@ def generate_kernel_and_analysis_datasets(X_test, Y_test, num_kernel_samples, nu
   return kernel_X, analysis_X_train, analysis_Y_train, analysis_X_test, analysis_Y_test
 
 # Return a batched kernel function where trace_axes=() [for calculating DOTS]
+@jax.jit
 def compute_kernel_trace_axes_fn(transformer_state_apply_fn): 
   kernel_fn_trace_axes = nt.empirical_kernel_fn(transformer_state_apply_fn,
                        vmap_axes=0,
@@ -130,13 +132,15 @@ def compute_kernel_trace_axes_fn(transformer_state_apply_fn):
   return kernel_fn_trace_axes
 
 # Return a batched kernel function where trace_axes is not defined [for computing everything other than DOTS]
+@jax.jit
 def compute_kernel_fn(transformer_state_apply_fn):
   kernel_fn = nt.empirical_kernel_fn(transformer_state_apply_fn,
                      vmap_axes=0,
                      implementation=nt.NtkImplementation.STRUCTURED_DERIVATIVES,)
   return kernel_fn 
 
-# Apply the kernel_trace_axes_fn to the values X with given transformer_state_params 
+# Apply the kernel_trace_axes_fn to the values X with given transformer_state_params
+@jax.jit(static_argnums=(2,3))
 def compute_kernel_trace_axes(kernel_trace_axes_fn, transformer_state_params, X, batch_size):
   kernel_trace_axes_fn_batched = nt.batch(kernel_trace_axes_fn, device_count=-1, batch_size=batch_size)
   kernel_trace_axes = kernel_trace_axes_fn_batched(X, None, "ntk", transformer_state_params)
@@ -144,12 +148,14 @@ def compute_kernel_trace_axes(kernel_trace_axes_fn, transformer_state_params, X,
   return kernel_trace_axes
 
 # Apply the kernel_fn to the values X with given transformer_state_params 
+@jax.jit(static_argnums=(2,3))
 def compute_kernel(kernel_fn, transformer_state_params, X, batch_size):
   kernel_fn_batched = nt.batch(kernel_fn, device_count=-1, batch_size=batch_size)
   kernel = kernel_fn_batched(X, None, "ntk", transformer_state_params)
   return kernel 
 
 # Compute DOTS on the kernel_trace_axes matrix 
+@jax.jit
 def compute_dots(kernel_trace_axes):
     kernel_rank = jax.jit(jnp.linalg.matrix_rank)(kernel_trace_axes)
     return kernel_rank.item()
@@ -159,7 +165,7 @@ def compute_custom_kernel_fn(kernel_fn, state_params):
   return lambda X1, X2: kernel_fn(X1, X2, "ntk", state_params)
 
 # Given the a custom kernel and training/test data, compute the accuracy of an SVM 
-def compute_svm_accuracy(custom_kernel_fn, analysis_X_train, analysis_Y_train, analysis_X_test, analysis_Y_test): 
+def compute_svm_accuracy(custom_kernel_fn, analysis_X_train, analysis_Y_train, analysis_X_test, analysis_Y_test):
   svc = SVC(kernel=custom_kernel_fn)
   svc.fit(analysis_X_train, analysis_Y_train)
   predictions = svc.predict(analysis_X_test)
@@ -176,6 +182,7 @@ def compute_gp_accuracy(custom_kernel_fn, analysis_X_train, analysis_Y_train, an
   return accuracy 
 
 # Compute the kernel alignment metric (Shan 2022: A Theory of Neural Tangent Kernel Alignment and Its Influence on Training)
+@jax.jit
 def compute_kernel_alignment(kernel, analysis_Y_test):
   kernel_alignment = (analysis_Y_test.T @ kernel @ analysis_Y_test) / (jnp.linalg.norm(kernel) * jnp.linalg.norm(analysis_Y_test))
   return kernel_alignment.item()
