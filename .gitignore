@@ -12,3 +12,6 @@ logs
 
 # Python virtual environment 
 /venv
+
+# Others
+.nfs*
