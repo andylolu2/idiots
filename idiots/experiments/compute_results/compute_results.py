@@ -21,19 +21,25 @@ import warnings
 import gc
 from functools import partial
 
+import numpy as np 
+
 os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
 
 warnings.filterwarnings('ignore')
 
 # GP kernel object (for compatability with sklearn.gaussian_proccess)
 class CustomKernel(StationaryKernelMixin, NormalizedKernelMixin, Kernel):
-    def __init__(self, kernel_fn):
-        self.kernel_fn = kernel_fn
-        super().__init__()
+  def __init__(self, kernel_fn):
+      self.kernel_fn = kernel_fn
+      super().__init__()
 
-    @jax.jit
-    def __call__(self, X, Y=None):
-        return self.kernel_fn(X, Y)
+  def __call__(self, X, Y=None, eval_gradient=False):
+      kernel = np.array(self.kernel_fn(X, Y))
+      
+      if eval_gradient: 
+        return kernel, np.zeros(X.shape)
+      else: 
+        return kernel 
     
 # Return the transformer state and training/test accuracy/loss for each timestep 
 def eval_checkpoint(step, batch_size, ds_train, ds_test, num_classes, restore_manager, restore_partial_fn):
@@ -174,19 +180,11 @@ def compute_gp_accuracy(custom_kernel_fn, analysis_X_train, analysis_Y_train, an
   
   analysis_Y_train_one_hot = jax.nn.one_hot(analysis_Y_train, num_y_classes)
   
-  print(analysis_Y_train.shape)
-  print(analysis_Y_train_one_hot.shape)
-
-  custom_gp_kernel = RBF(length_scale=1e7) # CustomKernel(kernel_fn=custom_kernel)
+  custom_gp_kernel = CustomKernel(kernel_fn=custom_kernel_fn) # RBF(length_scale=1e3)
   gaussian_process_classifier = GaussianProcessRegressor(kernel=custom_gp_kernel)
   gaussian_process_classifier.fit(analysis_X_train, analysis_Y_train_one_hot)
 
-  print(gaussian_process_classifier.predict(analysis_X_test))
-  print(gaussian_process_classifier.predict(analysis_X_test).shape)
-
   predictions = gaussian_process_classifier.predict(analysis_X_test).argmax(axis=-1)
-
-  print(accuracy_score(analysis_Y_test, predictions))
 
   accuracy = accuracy_score(analysis_Y_test, predictions)
   return accuracy 
@@ -302,7 +300,7 @@ if __name__ == "__main__":
   logs_base_path = "/home/dm894/idiots/logs/"
 
   experiments = [
-                ("mnist", "mnist-slower", "checkpoints/mnist-slower/checkpoints", "mnist", 10_000, 20_000, 256, 256, 256),
+                ("mnist", "mnist-slower", "checkpoints/mnist-slower/checkpoints", "mnist", 10_000, 100_000, 256, 256, 256),
                 ]
 
   compute_results(logs_base_path, experiments, add_kernel=False)
