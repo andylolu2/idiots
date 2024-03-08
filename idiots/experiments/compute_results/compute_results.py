@@ -160,17 +160,18 @@ def compute_gp_accuracy(
     return accuracy
 
 
+@jax.jit
 def compute_kernel_alignment(kernel, analysis_Y_test):
     """Compute the kernel alignment metric.
 
     Source: Shan 2022: A Theory of Neural Tangent Kernel Alignment and Its Influence on Training
     We use the "traced" kernel here.
     """
-    traced_kernel = jnp.trace(kernel, axis1=-2, axis2=-1) / kernel.shape[-1]
-    kernel_alignment = (analysis_Y_test.T @ traced_kernel @ analysis_Y_test) / (
-        jnp.linalg.norm(kernel) * jnp.linalg.norm(analysis_Y_test)
-    )
-    return kernel_alignment.item()
+    Y = jax.nn.one_hot(analysis_Y_test, kernel.shape[-1])
+    YYT = Y @ Y.T
+    K = jnp.trace(kernel, axis1=-2, axis2=-1) / kernel.shape[-1]
+    kernel_alignment = jnp.sum(YYT * K) / (jnp.linalg.norm(K) * jnp.linalg.norm(YYT))
+    return kernel_alignment
 
 
 def compute_results(logs_base_path, experiments, add_kernel, kernel_batch_size=32):
@@ -283,7 +284,7 @@ def compute_results(logs_base_path, experiments, add_kernel, kernel_batch_size=3
                     "dots": dots_1.item(),
                     "dots_2": dots_2.item(),
                     "dots_3": dots_3.item(),
-                    "kernel_alignment": kernel_alignment,
+                    "kernel_alignment": kernel_alignment.item(),
                     "kernel": kernel.tolist() if add_kernel else None,
                     "weight_norm": optax.global_norm(state.params).item(),
                 }
@@ -309,29 +310,29 @@ if __name__ == "__main__":
             "mnist",
             1_000,
             100_000,
-            512,
+            256,
             64,
-            64,
+            256,
         ),
-        (
-            "mnist-adamw",
-            "checkpoints/mnist/mnist_adamw/checkpoints",
-            "mnist",
-            1_000,
-            50_000,
-            512,
-            64,
-            64,
-        ),
+        # (
+        #     "mnist-adamw",
+        #     "checkpoints/mnist/mnist_adamw/checkpoints",
+        #     "mnist",
+        #     1_000,
+        #     50_000,
+        #     512,
+        #     64,
+        #     256,
+        # ),
         (
             "mnist-grokking-slower",
             "checkpoints/mnist/mnist_grokking_slower/checkpoints",
             "mnist",
             1_000,
             100_000,
-            512,
+            256,
             64,
-            64,
+            256,
         ),
     ]
 
