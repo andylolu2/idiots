@@ -1,15 +1,14 @@
-import gc
 import json
 import os
 import warnings
-from functools import partial
 from pathlib import Path
 
 import jax
 import jax.numpy as jnp
 import neural_tangents as nt
 import numpy as np
-import pandas as pd
+import optax
+import orbax.checkpoint as ocp
 from einops import rearrange
 from sklearn.gaussian_process import GaussianProcessRegressor
 from sklearn.gaussian_process.kernels import (
@@ -20,19 +19,12 @@ from sklearn.gaussian_process.kernels import (
 )
 from sklearn.metrics import accuracy_score
 from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import OneHotEncoder
 from sklearn.svm import SVC
 
 from idiots.dataset.dataloader import DataLoader
 from idiots.experiments.classification.training import restore as mnist_restore
-from idiots.experiments.classification.training import (
-    restore_partial as mnist_restore_partial,
-)
-from idiots.experiments.grokking.training import eval_step
+from idiots.experiments.grokking.training import TrainState, eval_step
 from idiots.experiments.grokking.training import restore as algorithmic_restore
-from idiots.experiments.grokking.training import (
-    restore_partial as algorithmic_restore_partial,
-)
 from idiots.utils import metrics
 
 os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
@@ -40,37 +32,11 @@ os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
 warnings.filterwarnings("ignore")
 
 
-# GP kernel object (for compatability with sklearn.gaussian_proccess)
-class CustomKernel(StationaryKernelMixin, NormalizedKernelMixin, Kernel):
-    def __init__(self, kernel_fn):
-        self.kernel_fn = kernel_fn
-        super().__init__()
+def eval_checkpoint(state, config, train_loader, test_loader):
+    """Compute training/test accuracy/loss for each timestep"""
 
-    def __call__(self, X, Y=None, eval_gradient=False):
-        kernel = np.array(self.kernel_fn(X, Y))
-
-        if eval_gradient:
-            return kernel, np.zeros(X.shape)
-        else:
-            return kernel
-
-
-# Return the transformer state and training/test accuracy/loss for each timestep
-def eval_checkpoint(
-    step,
-    batch_size,
-    ds_train,
-    ds_test,
-    num_classes,
-    restore_manager,
-    restore_partial_fn,
-):
-    config, state = restore_partial_fn(
-        restore_manager, step, ds_train["x"][:1], num_classes
-    )
-
-    def eval_loss_acc(ds):
-        for batch in DataLoader(ds, batch_size):
+    def eval_loss_acc(loader):
+        for batch in loader:
             logs = eval_step(state, batch, config.loss_variant)
             metrics.log(**logs)
         [losses, accuracies] = metrics.collect("eval_loss", "eval_accuracy")
@@ -78,96 +44,19 @@ def eval_checkpoint(
         acc = jnp.concatenate(accuracies).mean().item()
         return loss, acc
 
-    if len(ds_train["x"]) > len(ds_test["x"]):
-        ds_train = ds_train.select(range(len(ds_test["x"])))
+    train_loss, train_acc = eval_loss_acc(train_loader)
+    test_loss, test_acc = eval_loss_acc(test_loader)
 
-    train_loss, train_acc = eval_loss_acc(ds_train)
-    test_loss, test_acc = eval_loss_acc(ds_test)
-
-    return state, train_loss, train_acc, test_loss, test_acc
+    return train_loss, train_acc, test_loss, test_acc
 
 
-def extract_data_from_checkpoints(
-    restore_manager,
-    ds_train,
-    ds_test,
-    num_classes,
-    total_steps,
-    step_distance,
-    restore_partial_fn,
-    eval_checkpoint_batch_size=512,
-):
-    """
-    Returns a dataframe representing the checkpoint data of the *transformer*, containing:
-    - step (current checkpoint step)
-    - state (of transformer network)
-    - train_loss
-    - train_acc
-    - test_loss
-    - test_acc
-    """
-    data = []
-    for step in range(0, total_steps, step_distance):
-        print(
-            f"Loading Data: {(step // step_distance) + 1}/{total_steps // step_distance}"
-        )
-
-        state, train_loss, train_acc, test_loss, test_acc = eval_checkpoint(
-            step,
-            eval_checkpoint_batch_size,
-            ds_train,
-            ds_test,
-            num_classes,
-            restore_manager,
-            restore_partial_fn,
-        )
-        data.append(
-            {
-                "step": step,
-                "state": state,
-                "train_loss": train_loss,
-                "train_acc": train_acc,
-                "test_loss": test_loss,
-                "test_acc": test_acc,
-            }
-        )
-
-    return pd.DataFrame(data)
-
-
-# Parse the general checkpoint dataframe into useful sub-dataframes and lists
-def parse_general_checkpoint_dataframe(df):
-    state_checkpoints = df["state"].tolist()
-
-    df_loss = df[["step", "train_loss", "test_loss"]]
-    df_loss = df_loss.melt("step", var_name="split", value_name="loss")
-    df_loss["split"] = df_loss["split"].str.replace("_loss", "")
-
-    df_acc = df[["step", "train_acc", "test_acc"]]
-    df_acc = df_acc.melt("step", var_name="split", value_name="accuracy")
-    df_acc["split"] = df_acc["split"].str.replace("_acc", "")
-
-    steps = df["step"].tolist()
-    training_loss = df_loss[df_loss["split"] == "train"]["loss"].tolist()
-    test_loss = df_loss[df_loss["split"] == "test"]["loss"].tolist()
-    training_acc = df_acc[df_acc["split"] == "train"]["accuracy"].tolist()
-    test_acc = df_acc[df_acc["split"] == "test"]["accuracy"].tolist()
-
-    return state_checkpoints, steps, training_loss, test_loss, training_acc, test_acc
-
-
-# From X_test and Y_test, generate two (disjoint) datasets: one for calculating kernels and one for the remaining analysis (SVM & GP accuracy, and other metrics such as kernel alignment)
-def generate_kernel_and_analysis_datasets(
+def generate_analysis_dataset(
     X_test,
     Y_test,
-    num_kernel_samples,
     num_analysis_training_samples,
     num_analysis_test_samples,
     experiment_type,
 ):
-    kernel_X, X_test, kernel_Y, Y_test = train_test_split(
-        X_test, Y_test, train_size=num_kernel_samples, stratify=Y_test
-    )
     analysis_X_train, X_test, analysis_Y_train, Y_test = train_test_split(
         X_test, Y_test, train_size=num_analysis_training_samples, stratify=Y_test
     )
@@ -179,66 +68,46 @@ def generate_kernel_and_analysis_datasets(
         analysis_X_train = rearrange(analysis_X_train, "b h w -> b (h w)")
         analysis_X_test = rearrange(analysis_X_test, "b h w -> b (h w)")
 
-    return (
-        kernel_X,
-        analysis_X_train,
-        analysis_Y_train,
-        analysis_X_test,
-        analysis_Y_test,
-    )
+    return (analysis_X_train, analysis_Y_train, analysis_X_test, analysis_Y_test)
 
 
 # Return a batched kernel function where trace_axes=() [for calculating DOTS]
-def compute_kernel_trace_axes_fn(transformer_state_apply_fn):
-    kernel_fn_trace_axes = nt.empirical_kernel_fn(
+def compute_kernel_trace_axes_fn(transformer_state_apply_fn, batch_size):
+    kernel_fn_trace_axes = nt.empirical_ntk_fn(
         transformer_state_apply_fn,
         vmap_axes=0,
         trace_axes=(),
         implementation=nt.NtkImplementation.STRUCTURED_DERIVATIVES,
     )
-    return kernel_fn_trace_axes
+    return nt.batch(kernel_fn_trace_axes, batch_size=batch_size)
 
 
 # Return a batched kernel function where trace_axes is not defined [for computing everything other than DOTS]
-def compute_kernel_fn(transformer_state_apply_fn):
-    kernel_fn = nt.empirical_kernel_fn(
+def compute_kernel_fn(transformer_state_apply_fn, batch_size):
+    kernel_fn = nt.empirical_ntk_fn(
         transformer_state_apply_fn,
         vmap_axes=0,
         implementation=nt.NtkImplementation.STRUCTURED_DERIVATIVES,
     )
-    return kernel_fn
+    return nt.batch(kernel_fn, batch_size=batch_size)
 
 
-# Apply the kernel_trace_axes_fn to the values X with given transformer_state_params
-def compute_kernel_trace_axes(
-    kernel_trace_axes_fn, transformer_state_params, X, batch_size
-):
-    kernel_trace_axes_fn_batched = nt.batch(
-        kernel_trace_axes_fn, device_count=-1, batch_size=batch_size
-    )
-    kernel_trace_axes = kernel_trace_axes_fn_batched(
-        X, None, "ntk", transformer_state_params
-    )
-    kernel_trace_axes = rearrange(kernel_trace_axes, "b1 b2 d1 d2 -> (b1 d1) (b2 d2)")
-    return kernel_trace_axes
-
-
-# Apply the kernel_fn to the values X with given transformer_state_params
-def compute_kernel(kernel_fn, transformer_state_params, X, batch_size):
-    kernel_fn_batched = nt.batch(kernel_fn, device_count=-1, batch_size=batch_size)
-    kernel = kernel_fn_batched(X, None, "ntk", transformer_state_params)
-    return kernel
-
-
-# Compute DOTS on the kernel_trace_axes matrix
+@jax.jit
 def compute_dots(kernel_trace_axes):
-    kernel_rank = jax.jit(jnp.linalg.matrix_rank)(kernel_trace_axes)
-    return kernel_rank.item()
+    """Compute DOTS on the kernel_trace_axes matrix"""
+    ntk_flat = rearrange(kernel_trace_axes, "b1 b2 d1 d2 -> (b1 d1) (b2 d2)")
+    S = jnp.linalg.svd(ntk_flat, full_matrices=False, compute_uv=False)
+    m, n = ntk_flat.shape
 
+    tol_1 = S.max(-1) * np.max([m, n]).astype(S.dtype) * jnp.finfo(S.dtype).eps
+    tol_2 = 0.5 * S.max(-1) * jnp.finfo(S.dtype).eps * jnp.sqrt(m + n + 1)
+    dots_1 = jnp.sum(S > tol_1)
+    dots_2 = jnp.sum(S > tol_2)
 
-# Create a custom_kernel_function for use in training the SVM and GP (mapping inputs X1 and X2 to a kernel matrix)
-def compute_custom_kernel_fn(kernel_fn, state_params):
-    return lambda X1, X2: kernel_fn(X1, X2, "ntk", state_params)
+    s_dist = S / jnp.sum(S)
+    dots_3 = jnp.exp(-jnp.sum(s_dist * jnp.log(s_dist)))
+
+    return dots_1, dots_2, dots_3
 
 
 # Given the a custom kernel and training/test data, compute the accuracy of an SVM
@@ -251,9 +120,10 @@ def compute_svm_accuracy(
 ):
     svc = SVC(kernel=custom_kernel_fn)
     svc.fit(analysis_X_train, analysis_Y_train)
-    predictions = svc.predict(analysis_X_test)
-    accuracy = accuracy_score(analysis_Y_test, predictions)
-    return accuracy
+
+    train_accuracy = svc.score(analysis_X_train, analysis_Y_train)
+    test_accuracy = svc.score(analysis_X_test, analysis_Y_test)
+    return train_accuracy, test_accuracy
 
 
 # Given the a custom kernel and training/test data, compute the accuracy of a Gaussian Process
@@ -267,233 +137,204 @@ def compute_gp_accuracy(
 ):
     analysis_Y_train_one_hot = jax.nn.one_hot(analysis_Y_train, num_y_classes)
 
-    custom_gp_kernel = CustomKernel(kernel_fn=custom_kernel_fn)  # RBF(length_scale=1e3)
+    class CustomKernel(StationaryKernelMixin, NormalizedKernelMixin, Kernel):
+        """GP kernel object (for compatability with sklearn.gaussian_proccess)"""
+
+        def __init__(self) -> None:
+            super().__init__()
+
+        def __call__(self, X, Y=None, eval_gradient=False):
+            kernel = np.array(custom_kernel_fn(X, Y))
+
+            if eval_gradient:
+                return kernel, np.zeros(X.shape)
+            else:
+                return kernel
+
+    custom_gp_kernel = CustomKernel()  # RBF(length_scale=1e3)
     gaussian_process_classifier = GaussianProcessRegressor(kernel=custom_gp_kernel)
     gaussian_process_classifier.fit(analysis_X_train, analysis_Y_train_one_hot)
 
     predictions = gaussian_process_classifier.predict(analysis_X_test).argmax(axis=-1)
-
     accuracy = accuracy_score(analysis_Y_test, predictions)
     return accuracy
 
 
-# Compute the kernel alignment metric (Shan 2022: A Theory of Neural Tangent Kernel Alignment and Its Influence on Training)
 def compute_kernel_alignment(kernel, analysis_Y_test):
-    kernel_alignment = (analysis_Y_test.T @ kernel @ analysis_Y_test) / (
+    """Compute the kernel alignment metric.
+
+    Source: Shan 2022: A Theory of Neural Tangent Kernel Alignment and Its Influence on Training
+    We use the "traced" kernel here.
+    """
+    traced_kernel = jnp.trace(kernel, axis1=-2, axis2=-1) / kernel.shape[-1]
+    kernel_alignment = (analysis_Y_test.T @ traced_kernel @ analysis_Y_test) / (
         jnp.linalg.norm(kernel) * jnp.linalg.norm(analysis_Y_test)
     )
     return kernel_alignment.item()
 
 
-# Save the computed results to the determined file. Adding kernels is controlled by the add_kernel parameter as kernels take a large space to store
-def save_results_to_json(
-    steps,
-    training_loss,
-    test_loss,
-    training_acc,
-    test_acc,
-    svm_accuracy,
-    gp_accuracy,
-    dots_results,
-    kernel_alignments,
-    computed_kernels,
-    experiment_json_file_name,
-    add_kernel,
-):
-    graph_data = {
-        "step": steps,
-        "training_loss": training_loss,
-        "test_loss": test_loss,
-        "training_acc": training_acc,
-        "test_acc": test_acc,
-        "svm_accuracy": svm_accuracy,
-        "gp_accuracy": gp_accuracy,
-        "dots": dots_results,
-        "kernel_alignment": kernel_alignments,
-    }
-
-    if add_kernel:
-        graph_data["kernels"] = computed_kernels
-
-    json_data = json.dumps(graph_data, indent=2)
-
-    checkpoint_dir = Path(
-        logs_base_path, "results", f"{experiment_json_file_name}.json"
-    )
-
-    with open(checkpoint_dir, "w") as json_file:
-        json_file.write(json_data)
-
-
 def compute_results(logs_base_path, experiments, add_kernel, kernel_batch_size=32):
     """
     logs_base_path: e.g. "/home/dm894/idiots/logs/"
-    experiments: (experiment_name, experiment_json_file_name, experiment_checkpoint_path, experiment_type, step_distance, total_steps, num_dots_samples, num_analysis_training_samples, num_analysis_test_samples) list
-    experiment_name: for printing out before experiment starts (does not affect the remainder of the program)
-    experiment_json_file_name: e.g. "mnist-100" to save file as "mnist-100.json"
-    experiment_checkpoint_path: e.g. "checkpoints/mnist-100/checkpoints"
-    experiment_type: either "algorithmic" for modular division or S5, or "mnist" for mnist
-    step_distance: distance between checkpoints you want to analyse
-    total_steps = value of the highest checkpoint you want to analyse
-    num_kernel_samples = number of samples used when computing kernels (for DOTS and the remaining analysis)
-    num_analysis_training_samples = number of training samples used in the remaining analysis: when fitting the SVM, GP, and metrics such as kernel alignment
-    num_analysis_test_samples = number of test samples used in the remaining analysis: when fitting the SVM, GP, and metrics such as kernel alignment
+    experiments: (
+        experiment_json_file_name: e.g. "mnist-100" to save file as "mnist-100.json",
+        experiment_checkpoint_path: e.g. "checkpoints/mnist-100/checkpoints",
+        experiment_type: either "algorithmic" for modular division or S5, or "mnist" for mnist,
+        step_distance: distance between checkpoints you want to analyse,
+        total_steps: value of the highest checkpoint you want to analyse,
+        kernel_samples: number of samples used to compute the DOTS and kernel alignment,
+        num_analysis_training_samples: number of training samples used in the remaining analysis: when fitting the SVM and GP,
+        num_analysis_test_samples: number of test samples used in the remaining analysis: when fitting the SVM and GP,
+    )
     add_kernel: whether the kernel should be computed and added to the log file (can take up a large amount of space)
     kernel_batch_size: batch size when computing the kernels using nt.batch
     """
     for (
-        experiment_name,
         experiment_json_file_name,
         experiment_checkpoint_path,
         experiment_type,
         step_distance,
         total_steps,
-        num_kernel_samples,
+        kernel_samples,
         num_analysis_training_samples,
         num_analysis_test_samples,
     ) in experiments:
-        print("Experiment:", experiment_name)
+        print(f"Experiment: {experiment_json_file_name}")
 
         experiment_checkpoint_path = Path(logs_base_path, experiment_checkpoint_path)
 
         if experiment_type == "algorithmic":
             restore_fn = algorithmic_restore
-            restore_partial_fn = algorithmic_restore_partial
         elif experiment_type == "mnist":
             restore_fn = mnist_restore
-            restore_partial_fn = mnist_restore_partial
         else:
-            print(f"Experiment type {experiment_type} not valid.")
-            exit(1)
+            raise ValueError(f"Experiment type {experiment_type} not valid.")
 
-        restore_manager, _, _, ds_train, ds_test = restore_fn(
+        restore_manager, config, state, ds_train, ds_test = restore_fn(
             experiment_checkpoint_path, 0
+        )
+        if len(ds_train) > len(ds_test):
+            ds_train = ds_train.select(range(len(ds_test)))
+
+        train_loader = DataLoader(ds_train, config.train_batch_size)
+        test_loader = DataLoader(ds_test, config.test_batch_size)
+        kernel_fn = compute_kernel_fn(state.apply_fn, kernel_batch_size)
+        kernel_trace_axes_fn = compute_kernel_trace_axes_fn(
+            state.apply_fn, kernel_batch_size
         )
 
         X_test, Y_test = jnp.array(ds_test["x"]), jnp.array(ds_test["y"])
-
-        num_y_classes = ds_train.features["y"].num_classes
-        y_classes = jnp.array([i for i in range(num_y_classes)])
-
-        df = extract_data_from_checkpoints(
-            restore_manager,
-            ds_train,
-            ds_test,
-            num_y_classes,
-            total_steps,
-            step_distance,
-            restore_partial_fn,
-        )
+        # kernel dataset is used for computing the kernels used in DOTS and kernel alignment
+        # analysis datasets are used for the remaining analysis: SVM, GP
         (
-            transformer_states,
-            steps,
-            training_loss,
-            test_loss,
-            training_acc,
-            test_acc,
-        ) = parse_general_checkpoint_dataframe(df)
-
-        svm_accuracy = []
-        gp_accuracy = []
-        dots_results = []
-        computed_kernels = []
-        kernel_alignments = []
-
-        # kernel dataset is used for computing the kernels used in DOTS and the remaining analysis
-        # analysis datasets are used for the remaining analysis: SVM, GP, and remaining metrics such as kernel alignment
-        (
-            kernel_X,
             analysis_X_train,
             analysis_Y_train,
             analysis_X_test,
             analysis_Y_test,
-        ) = generate_kernel_and_analysis_datasets(
+        ) = generate_analysis_dataset(
             X_test,
             Y_test,
-            num_kernel_samples,
             num_analysis_training_samples,
             num_analysis_test_samples,
             experiment_type,
         )
 
-        for i, transformer_state in enumerate(transformer_states):
-            gc.collect()
-            print(f"Computing Results: {i + 1}/{len(transformer_states)}")
-
-            kernel_trace_axes_fn = compute_kernel_trace_axes_fn(
-                transformer_state.apply_fn
-            )
-            kernel_fn = compute_kernel_fn(transformer_state.apply_fn)
-
-            kernel_trace_axes = compute_kernel_trace_axes(
-                kernel_trace_axes_fn,
-                transformer_state.params,
-                kernel_X,
-                kernel_batch_size,
-            )
-            kernel = compute_kernel(
-                kernel_fn, transformer_state.params, kernel_X, kernel_batch_size
-            )
-
-            custom_kernel_fn = compute_custom_kernel_fn(
-                kernel_fn, transformer_state.params
-            )
-
-            computed_kernels.append(kernel.tolist())
-            dots_results.append(compute_dots(kernel_trace_axes))
-            svm_accuracy.append(
-                compute_svm_accuracy(
-                    custom_kernel_fn,
-                    analysis_X_train,
-                    analysis_Y_train,
-                    analysis_X_test,
-                    analysis_Y_test,
+        all_metircs = []
+        for step in range(0, total_steps + 1, step_distance):
+            if step > 0:
+                state = restore_manager.restore(
+                    step, args=ocp.args.StandardRestore(state)
                 )
+            train_loss, train_acc, test_loss, test_acc = eval_checkpoint(
+                state, config, train_loader, test_loader
             )
-            gp_accuracy.append(
-                compute_gp_accuracy(
-                    custom_kernel_fn,
-                    analysis_X_train,
-                    analysis_Y_train,
-                    analysis_X_test,
-                    analysis_Y_test,
-                    num_y_classes,
-                )
+            svm_train_acc, svm_test_acc = compute_svm_accuracy(
+                lambda x1, x2: kernel_fn(x1, x2, state.params),
+                analysis_X_train,
+                analysis_Y_train,
+                analysis_X_test,
+                analysis_Y_test,
             )
-            kernel_alignments.append(compute_kernel_alignment(kernel, analysis_Y_test))
+            gp_acc = compute_gp_accuracy(
+                lambda x1, x2: kernel_fn(x1, x2, state.params),
+                analysis_X_train,
+                analysis_Y_train,
+                analysis_X_test,
+                analysis_Y_test,
+                ds_train.features["y"].num_classes,
+            )
 
-        print("Storing Results...")
-        save_results_to_json(
-            steps,
-            training_loss,
-            test_loss,
-            training_acc,
-            test_acc,
-            svm_accuracy,
-            gp_accuracy,
-            dots_results,
-            kernel_alignments,
-            computed_kernels,
-            experiment_json_file_name,
-            add_kernel,
-        )
+            kernel_X = ds_test["x"][:kernel_samples]
+            kernel_Y = ds_test["y"][:kernel_samples]
+            kernel = kernel_trace_axes_fn(kernel_X, None, state.params)
+            dots_1, dots_2, dots_3 = compute_dots(kernel)
+            kernel_alignment = compute_kernel_alignment(kernel, kernel_Y)
+
+            all_metircs.append(
+                {
+                    "step": step,
+                    "train_loss": train_loss,
+                    "test_loss": test_loss,
+                    "training_acc": train_acc,
+                    "test_acc": test_acc,
+                    "svm_train_accuracy": svm_train_acc,
+                    "svm_accuracy": svm_test_acc,
+                    "gp_accuracy": gp_acc,
+                    "dots": dots_1.item(),
+                    "dots_2": dots_2.item(),
+                    "dots_3": dots_3.item(),
+                    "kernel_alignment": kernel_alignment,
+                    "kernel": kernel.tolist() if add_kernel else None,
+                    "weight_norm": optax.global_norm(state.params).item(),
+                }
+            )
+            print(json.dumps(all_metircs[-1], indent=2))
+
+        out_file = Path(logs_base_path, "results", f"{experiment_json_file_name}.json")
+        out_file.parent.mkdir(parents=True, exist_ok=True)
+        with open(out_file, "w") as f:
+            # Convert list[dict] -> dict[list]
+            metrics = {k: [d[k] for d in all_metircs] for k in all_metircs[0]}
+            json.dump(metrics, f, indent=2)
 
 
 if __name__ == "__main__":
-    logs_base_path = "/home/dm894/idiots/logs/"
+    # logs_base_path = "/home/dm894/idiots/logs/"
+    logs_base_path = "logs"
 
     experiments = [
         (
+            "mnist-gd-grokking",
+            "checkpoints/mnist/mnist_gd_grokking/checkpoints",
             "mnist",
-            "mnist-slower",
-            "checkpoints/mnist-slower/checkpoints",
-            "mnist",
-            10_000,
+            1_000,
             100_000,
-            256,
-            256,
-            256,
+            512,
+            64,
+            64,
+        ),
+        (
+            "mnist-adamw",
+            "checkpoints/mnist/mnist_adamw/checkpoints",
+            "mnist",
+            1_000,
+            50_000,
+            512,
+            64,
+            64,
+        ),
+        (
+            "mnist-grokking-slower",
+            "checkpoints/mnist/mnist_grokking_slower/checkpoints",
+            "mnist",
+            1_000,
+            100_000,
+            512,
+            64,
+            64,
         ),
     ]
 
-    compute_results(logs_base_path, experiments, add_kernel=False)
+    compute_results(
+        logs_base_path, experiments, add_kernel=False, kernel_batch_size=256
+    )

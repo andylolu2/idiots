@@ -1,6 +1,5 @@
 import random
 
-import jax
 import jax.numpy as jnp
 import neural_tangents as nt
 import orbax.checkpoint as ocp
@@ -31,9 +30,16 @@ def main(_):
     state = state.replace(step=-1)
     logging.info("Number of parameters: %d", num_params(state.params))
 
-    train_iter = iter(
-        DataLoader(ds_train, config.train_batch_size, shuffle=True, infinite=True)
+    train_loader = DataLoader(
+        ds_train,
+        config.train_batch_size,
+        shuffle=True,
+        infinite=True,
+        drop_last=True,
+        seed=config.seed,
     )
+    eval_loader = DataLoader(ds_test, config.test_batch_size)
+    train_iter = iter(train_loader)
     kernel_fn = nt.empirical_ntk_fn(
         state.apply_fn,
         trace_axes=(),
@@ -68,7 +74,7 @@ def main(_):
             writer.add_scalar("train/update_norm", update_norm, state.step)
 
         if state.step % config.eval_every == 0 and config.eval_every > 0:
-            for batch in DataLoader(ds_test, config.test_batch_size):
+            for batch in eval_loader:
                 logs = eval_step(state, batch, config.loss_variant)
                 metrics.log(**logs)
             [losses, accuracies] = metrics.collect("eval_loss", "eval_accuracy")
