@@ -22,7 +22,8 @@ from sklearn.model_selection import train_test_split
 from sklearn.svm import SVC
 
 from idiots.dataset.dataloader import DataLoader
-from idiots.experiments.classification.training import restore as mnist_restore
+from idiots.experiments.classification.training import restore as mnist_restore, init_state_and_ds
+from idiots.experiments.classification.config import get_config
 from idiots.experiments.grokking.training import TrainState, eval_step
 from idiots.experiments.grokking.training import restore as algorithmic_restore
 from idiots.utils import metrics
@@ -217,6 +218,10 @@ def compute_results(logs_base_path, experiments, add_kernel, kernel_batch_size=3
         if len(ds_train) > len(ds_test):
             ds_train = ds_train.select(range(len(ds_test)))
 
+        initial_state, _, _ = init_state_and_ds(config)
+        initial_params = initial_state.params
+        initial_weight_norm = optax.global_norm(initial_params).item()
+
         train_loader = DataLoader(ds_train, config.train_batch_size)
         test_loader = DataLoader(ds_test, config.test_batch_size)
         kernel_fn = compute_kernel_fn(state.apply_fn, kernel_batch_size)
@@ -240,7 +245,7 @@ def compute_results(logs_base_path, experiments, add_kernel, kernel_batch_size=3
             experiment_type,
         )
 
-        all_metircs = []
+        all_metrics = []
         for step in range(0, total_steps + 1, step_distance):
             if step > 0:
                 state = restore_manager.restore(
@@ -271,7 +276,7 @@ def compute_results(logs_base_path, experiments, add_kernel, kernel_batch_size=3
             dots_1, dots_2, dots_3 = compute_dots(kernel)
             kernel_alignment = compute_kernel_alignment(kernel, kernel_Y)
 
-            all_metircs.append(
+            all_metrics.append(
                 {
                     "step": step,
                     "train_loss": train_loss,
@@ -287,32 +292,34 @@ def compute_results(logs_base_path, experiments, add_kernel, kernel_batch_size=3
                     "kernel_alignment": kernel_alignment.item(),
                     "kernel": kernel.tolist() if add_kernel else None,
                     "weight_norm": optax.global_norm(state.params).item(),
+                    "relative_weight_norm": optax.global_norm(state.params).item() / initial_weight_norm,
                 }
             )
-            print(json.dumps(all_metircs[-1], indent=2))
+            print(json.dumps(all_metrics[-1], indent=2))
 
         out_file = Path(logs_base_path, "results", f"{experiment_json_file_name}.json")
         out_file.parent.mkdir(parents=True, exist_ok=True)
         with open(out_file, "w") as f:
             # Convert list[dict] -> dict[list]
-            metrics = {k: [d[k] for d in all_metircs] for k in all_metircs[0]}
+            metrics = {k: [d[k] for d in all_metrics] for k in all_metrics[0]}
             json.dump(metrics, f, indent=2)
 
 
 if __name__ == "__main__":
     # logs_base_path = "/home/dm894/idiots/logs/"
     logs_base_path = "logs"
+    logs_base_path = "/home/dc755/idiots/logs/"
 
     experiments = [
         (
-            "mnist-gd-grokking",
-            "checkpoints/mnist/mnist_gd_grokking/checkpoints",
+            "mnist-gd-grokking-2",
+            "checkpoints/mnist_gd_grokking/exp55/checkpoints",
             "mnist",
             1_000,
             100_000,
-            256,
+            512,
             64,
-            256,
+            512,
         ),
         # (
         #     "mnist-adamw",
@@ -325,14 +332,14 @@ if __name__ == "__main__":
         #     256,
         # ),
         (
-            "mnist-grokking-slower",
-            "checkpoints/mnist/mnist_grokking_slower/checkpoints",
+            "mnist-grokking-slower-2",
+            "checkpoints/mnist_grokking_slower/exp26/checkpoints",
             "mnist",
             1_000,
             100_000,
-            256,
+            512,
             64,
-            256,
+            512,
         ),
     ]
 
