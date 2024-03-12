@@ -32,7 +32,7 @@ def get_sgd(
     **_,
 ):
     return optax.chain(
-        optax.clip_by_global_norm(100.0),
+        optax.clip_by_global_norm(100.0),  # Might not be necessary
         optax.add_decayed_weights(weight_decay=weight_decay),
         optax.scale_by_learning_rate(lr),
     )

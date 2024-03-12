@@ -75,7 +75,7 @@ def main(_):
             )
             loss = jnp.concatenate(losses).mean().item()
             acc = jnp.concatenate(accuracies).mean().item()
-            grad_norm = jnp.array(grad_norms).mean().item()
+            grad_norm = jnp.array(grad_norms).max().item()
             weight_norm = jnp.array(weight_norms).mean().item()
             update_norm = jnp.array(update_norms).mean().item()
             writer.add_scalar("train/loss", loss, state.step)

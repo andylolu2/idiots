@@ -26,6 +26,7 @@ def get_config():
         d_model=64,
         n_layers=2,
         n_heads=2,
+        old_parameterisation=True,
     )
 
     config.opt = dict(

@@ -77,6 +77,10 @@ def loss_fn(y_pred, y, variant="cross_entropy"):
         y = jax.nn.one_hot(y, num_classes=y_pred.shape[-1])
         y = y - jnp.mean(y, axis=-1, keepdims=True)
         return jnp.mean(jnp.square(y_pred - y), axis=-1)
+    elif variant == "mse_scaled":
+        y = 100 * jax.nn.one_hot(y, num_classes=y_pred.shape[-1])
+        y = y - jnp.mean(y, axis=-1, keepdims=True)
+        return jnp.mean(jnp.square(y_pred - y), axis=-1)
     else:
         raise ValueError(f"Unknown loss variant: {variant}")
 
@@ -99,6 +103,7 @@ def init_state_and_ds(config):
         d_model=config.model.d_model,
         n_layers=config.model.n_layers,
         n_heads=config.model.n_heads,
+        old_parameterisation=config.model.old_parameterisation,
         vocab_size=ds_train.features["y"].num_classes,
         max_len=ds_train.features["x"].length,
     )
@@ -113,6 +118,7 @@ def init_state(config, training_data_example, num_classes):
         d_model=config.model.d_model,
         n_layers=config.model.n_layers,
         n_heads=config.model.n_heads,
+        old_parameterisation=config.model.old_parameterisation,
         vocab_size=num_classes,
         max_len=training_data_example.shape[1],
     )

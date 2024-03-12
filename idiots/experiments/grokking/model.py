@@ -6,12 +6,17 @@ class Block(nn.Module):
     d_model: int
     n_heads: int
     d_ff: int
+    old_parameterisation: bool = True  # For backwards compatibility
 
     @nn.compact
     def __call__(self, x):
         # Attention block
         h = nn.LayerNorm()(x)
-        q, k, v = jnp.split(nn.Dense(self.d_model * 3)(h), 3, axis=-1)
+        if self.old_parameterisation:
+            q, k, v = jnp.split(nn.Dense(self.d_model * 3)(h), 3, axis=-1)
+        else:
+            # Turns out nn.MultiHeadAttention already does the Dense projection
+            q, k, v = h, h, h
         casual_mask = nn.make_causal_mask(jnp.ones_like(x[:, :, 0]), dtype=jnp.bool_)
         h = nn.MultiHeadAttention(self.n_heads)(q, k, v, mask=casual_mask)
         x += h
@@ -32,6 +37,7 @@ class TransformerSingleOutput(nn.Module):
     n_heads: int
     vocab_size: int
     max_len: int
+    old_parameterisation: bool = True
 
     @nn.compact
     def __call__(self, x):
@@ -42,7 +48,9 @@ class TransformerSingleOutput(nn.Module):
 
         for _ in range(self.n_layers):
             # (b s d) -> (b s d)
-            x = Block(self.d_model, self.n_heads, self.d_model * 4)(x)
+            x = Block(
+                self.d_model, self.n_heads, self.d_model * 4, self.old_parameterisation
+            )(x)
 
         # (b s d) -> (b v)
         logits = nn.Dense(self.vocab_size)(x[:, -1, :])
