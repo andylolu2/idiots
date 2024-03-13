@@ -86,7 +86,7 @@ def eval_checkpoint(
 
 
 """
-Returns a dataframe representing the checkpoint data of the *model*, containing: 
+Returns a dataframe representing the checkpoint data of the *modeltaining: 
   - step (current checkpoint step)
   - state (of model network)
   - train_loss 
@@ -315,6 +315,7 @@ def save_results_to_json(
     computed_kernels,
     experiment_json_file_name,
     add_kernel,
+    logs_base_path,
 ):
 
     graph_data = {
@@ -342,175 +343,207 @@ def save_results_to_json(
         json_file.write(json_data)
 
 
-"""
-logs_base_path: e.g. "/home/dm894/idiots/logs/"
-experiments: (experiment_name, experiment_json_file_name, experiment_checkpoint_path, experiment_type, step_distance, total_steps, num_dots_samples, num_analysis_training_samples, num_analysis_test_samples) list
-  experiment_name: for printing out before experiment starts (does not affect the remainder of the program)
-  experiment_json_file_name: e.g. "mnist-100" to save file as "mnist-100.json"
-  experiment_checkpoint_path: e.g. "checkpoints/mnist-100/checkpoints"
-  experiment_type: either "algorithmic" for modular division or S5, or "mnist" for mnist 
-  step_distance: distance between checkpoints you want to analyse 
-  total_steps = value of the highest checkpoint you want to analyse 
-  num_kernel_samples = number of samples used when computing kernels (for DOTS and the remaining analysis) 
-  num_analysis_training_samples = number of training samples used in the remaining analysis: when fitting the SVM, GP, and metrics such as kernel alignment 
-  num_analysis_test_samples = number of test samples used in the remaining analysis: when fitting the SVM, GP, and metrics such as kernel alignment 
-add_kernel: whether the kernel should be computed and added to the log file (can take up a large amount of space)
-kernel_batch_size: batch size when computing the kernels using nt.batch
-"""
+logs_base_path = "/home/dm894/idiots/logs/"
+
+experiment_name = "mnist"
+experiment_json_file_name = "mnist-slower"
+experiment_checkpoint_path = "checkpoints/mnist-slower/checkpoints"
+experiment_type = "mnist"
+step_distance = 10_000
+total_steps = 100_000
+num_kernel_samples = 256
+num_analysis_training_samples = 256
+num_analysis_test_samples = 256
 
 
-def compute_results(logs_base_path, experiments, add_kernel, kernel_batch_size=32):
+kernel_batch_size = 32
+add_kernel = False
 
-    for (
-        experiment_name,
-        experiment_json_file_name,
-        experiment_checkpoint_path,
-        experiment_type,
-        step_distance,
-        total_steps,
-        num_kernel_samples,
-        num_analysis_training_samples,
-        num_analysis_test_samples,
-    ) in experiments:
+experiment_checkpoint_path = Path(logs_base_path, experiment_checkpoint_path)
 
-        print("Experiment:", experiment_name)
+if experiment_type == "algorithmic":
+    restore_fn = algorithmic_restore
+    restore_partial_fn = algorithmic_restore_partial
+elif experiment_type == "mnist":
+    restore_fn = mnist_restore
+    restore_partial_fn = mnist_restore_partial
+else:
+    print(f"Experiment type {experiment_type} not valid.")
+    exit(1)
 
-        experiment_checkpoint_path = Path(logs_base_path, experiment_checkpoint_path)
+restore_manager, _, _, ds_train, ds_test = restore_fn(experiment_checkpoint_path, 0)
 
-        if experiment_type == "algorithmic":
-            restore_fn = algorithmic_restore
-            restore_partial_fn = algorithmic_restore_partial
-        elif experiment_type == "mnist":
-            restore_fn = mnist_restore
-            restore_partial_fn = mnist_restore_partial
-        else:
-            print(f"Experiment type {experiment_type} not valid.")
-            exit(1)
+X_test, Y_test = jnp.array(ds_test["x"]), jnp.array(ds_test["y"])
 
-        restore_manager, _, _, ds_train, ds_test = restore_fn(
-            experiment_checkpoint_path, 0
-        )
+num_y_classes = ds_train.features["y"].num_classes
 
-        X_test, Y_test = jnp.array(ds_test["x"]), jnp.array(ds_test["y"])
+df = extract_data_from_checkpoints(
+    restore_manager,
+    ds_train,
+    ds_test,
+    num_y_classes,
+    total_steps,
+    step_distance,
+    restore_partial_fn,
+)
+model_states, steps, training_loss, test_loss, training_acc, test_acc = (
+    parse_general_checkpoint_dataframe(df)
+)
 
-        num_y_classes = ds_train.features["y"].num_classes
+svm_accuracy = []
+gp_accuracy = []
+dots_results = []
+computed_kernels = []
+kernel_alignments = []
 
-        df = extract_data_from_checkpoints(
-            restore_manager,
-            ds_train,
-            ds_test,
-            num_y_classes,
-            total_steps,
-            step_distance,
-            restore_partial_fn,
-        )
-        model_states, steps, training_loss, test_loss, training_acc, test_acc = (
-            parse_general_checkpoint_dataframe(df)
-        )
+# kernel dataset is used for computing the kernels used in DOTS and the remaining analysis
+# analysis datasets are used for the remaining analysis: SVM, GP, and remaining metrics such as kernel alignment
+(
+    kernel_X,
+    analysis_X_train,
+    analysis_Y_train,
+    analysis_X_test,
+    analysis_Y_test,
+) = generate_kernel_and_analysis_datasets(
+    X_test,
+    Y_test,
+    num_kernel_samples,
+    num_analysis_training_samples,
+    num_analysis_test_samples,
+    experiment_type,
+)
 
-        svm_accuracy = []
-        gp_accuracy = []
-        dots_results = []
-        computed_kernels = []
-        kernel_alignments = []
+kernel_trace_axes_fn = compute_kernel_trace_axes_fn(model_states[0].apply_fn)
+kernel_fn = compute_kernel_fn(model_states[0].apply_fn)
 
-        # kernel dataset is used for computing the kernels used in DOTS and the remaining analysis
-        # analysis datasets are used for the remaining analysis: SVM, GP, and remaining metrics such as kernel alignment
-        (
-            kernel_X,
+for i, model_state in enumerate(model_states):
+
+    gc.collect()
+    print(f"Computing Results: {i + 1}/{len(model_states)}")
+
+    kernel_trace_axes = compute_kernel_trace_axes(
+        kernel_trace_axes_fn,
+        model_state.params,
+        kernel_X,
+        kernel_batch_size,
+    )
+    kernel = compute_kernel(
+        kernel_fn, model_state.params, kernel_X, kernel_batch_size
+    )
+
+    custom_kernel_fn = compute_custom_kernel_fn(kernel_fn, model_state.params)
+
+    computed_kernels.append(kernel.tolist())
+    dots_results.append(compute_dots(kernel_trace_axes))
+    svm_accuracy.append(
+        compute_svm_accuracy(
+            custom_kernel_fn,
             analysis_X_train,
             analysis_Y_train,
             analysis_X_test,
             analysis_Y_test,
-        ) = generate_kernel_and_analysis_datasets(
-            X_test,
-            Y_test,
-            num_kernel_samples,
-            num_analysis_training_samples,
-            num_analysis_test_samples,
-            experiment_type,
         )
-
-        kernel_trace_axes_fn = compute_kernel_trace_axes_fn(
-                model_state.apply_fn
-            )
-        kernel_fn = compute_kernel_fn(model_state.apply_fn)
-        
-        for i, model_state in enumerate(model_states):
-
-            gc.collect()
-            print(f"Computing Results: {i + 1}/{len(model_states)}")
-
-            kernel_trace_axes = compute_kernel_trace_axes(
-                kernel_trace_axes_fn,
-                model_state.params,
-                kernel_X,
-                kernel_batch_size,
-            )
-            kernel = compute_kernel(
-                kernel_fn, model_state.params, kernel_X, kernel_batch_size
-            )
-
-            custom_kernel_fn = compute_custom_kernel_fn(
-                kernel_fn, model_state.params
-            )
-
-            computed_kernels.append(kernel.tolist())
-            dots_results.append(compute_dots(kernel_trace_axes))
-            svm_accuracy.append(
-                compute_svm_accuracy(
-                    custom_kernel_fn,
-                    analysis_X_train,
-                    analysis_Y_train,
-                    analysis_X_test,
-                    analysis_Y_test,
-                )
-            )
-            gp_accuracy.append(
-                compute_gp_accuracy(
-                    custom_kernel_fn,
-                    analysis_X_train,
-                    analysis_Y_train,
-                    analysis_X_test,
-                    analysis_Y_test,
-                    num_y_classes,
-                )
-            )
-            kernel_alignments.append(compute_kernel_alignment(kernel, analysis_Y_test))
-
-        print("Storing Results...")
-        save_results_to_json(
-            steps,
-            training_loss,
-            test_loss,
-            training_acc,
-            test_acc,
-            svm_accuracy,
-            gp_accuracy,
-            dots_results,
-            kernel_alignments,
-            computed_kernels,
-            experiment_json_file_name,
-            add_kernel,
+    )
+    gp_accuracy.append(
+        compute_gp_accuracy(
+            custom_kernel_fn,
+            analysis_X_train,
+            analysis_Y_train,
+            analysis_X_test,
+            analysis_Y_test,
+            num_y_classes,
         )
+    )
+    kernel_alignments.append(compute_kernel_alignment(kernel, analysis_Y_test))
 
+print("Storing Results...")
+save_results_to_json(
+    steps,
+    training_loss,
+    test_loss,
+    training_acc,
+    test_acc,
+    svm_accuracy,
+    gp_accuracy,
+    dots_results,
+    kernel_alignments,
+    computed_kernels,
+    experiment_json_file_name,
+    add_kernel,
+    logs_base_path,
+)
 
-if __name__ == "__main__":
+from idiots.experiments.grokking.training import eval_step
+from copy import deepcopy
 
-    logs_base_path = "/home/dm894/idiots/logs/"
+kernel_fn = compute_kernel_fn(model_states[0].apply_fn)
+kernel_trace_axes_fn = compute_kernel_trace_axes_fn(model_states[0].apply_fn)
 
-    experiments = [
-        (
-            "mnist",
-            "mnist-slower",
-            "checkpoints/mnist-slower/checkpoints",
-            "mnist",
-            10_000,
-            100_000,
-            256,
-            256,
-            256,
-        ),
-    ]
+def compute_reparam_model_accuracy(model_state, batch_size=32):
+  batch_accuracy = []
 
-    compute_results(logs_base_path, experiments, add_kernel=False)
+  for batch in DataLoader(ds_test, batch_size):
+      logs = eval_step(model_state, batch, "cross_entropy")
+      batch_accuracy.append(logs["eval_accuracy"])
+
+  return jnp.concatenate(batch_accuracy).mean().item()
+
+def compute_reparam_svm_accuracy(model_state):
+
+  custom_kernel_fn = compute_custom_kernel_fn(kernel_fn, model_state.params)
+
+  return compute_svm_accuracy(
+            custom_kernel_fn,
+            analysis_X_train,
+            analysis_Y_train,
+            analysis_X_test,
+            analysis_Y_test,
+        )
+  
+def compute_reparam_dots(model_state): 
+
+  kernel_trace_axes = compute_kernel_trace_axes(
+          kernel_trace_axes_fn,
+          model_state.params,
+          kernel_X,
+          kernel_batch_size,
+      )
+  
+  return compute_dots(kernel_trace_axes)
+
+reparam_list = [2, 10, 100, 1000, 10_000, 100_000, 1_000_000]
+
+for i, reparam in enumerate(reparam_list):
+
+  gc.collect()
+  print(f"Computing Reparameterisation (reparam={reparam}): {i + 1}/{len(reparam_list)}")
+
+  reparam_model_accuracy_history = [] 
+  reparam_svm_accuracy_history = [] 
+  reparam_dots_history = [] 
+
+  for model_state in model_states: 
+
+    modified_model_state = deepcopy(model_state)
+    modified_model_state.params["params"]["Dense_0"]["kernel"] = reparam * modified_model_state.params["params"]["Dense_0"]["kernel"]
+    modified_model_state.params["params"]["Dense_0"]["bias"] = reparam * modified_model_state.params["params"]["Dense_0"]["bias"]
+    modified_model_state.params["params"]["Dense_1"]["kernel"] = (1 / reparam) * modified_model_state.params["params"]["Dense_1"]["kernel"]
+
+    reparam_model_accuracy_history.append(compute_reparam_model_accuracy(modified_model_state))
+    reparam_svm_accuracy_history.append(compute_reparam_svm_accuracy(modified_model_state))
+    reparam_dots_history.append(compute_reparam_dots(modified_model_state))
+
+  reparam_graph_data = {
+    "reparam_test_acc": reparam_model_accuracy_history,
+    "reparam_svm_accuracy": reparam_svm_accuracy_history,
+    "reparam_dots": reparam_dots_history
+  }
+
+  json_data = json.dumps(reparam_graph_data, indent=2)
+
+  checkpoint_dir = Path(
+          logs_base_path, "results", f"{experiment_json_file_name}-reparam-{reparam}.json"
+      )
+
+  with open(checkpoint_dir, "w") as json_file:
+    json_file.write(json_data)
