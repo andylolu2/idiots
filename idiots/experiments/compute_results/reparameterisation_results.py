@@ -343,17 +343,18 @@ def save_results_to_json(
         json_file.write(json_data)
 
 
-logs_base_path = "/home/dm894/idiots/logs/"
+# logs_base_path = "/home/dm894/idiots/logs/"
+logs_base_path = "/home/dc755/idiots/logs/"
 
 experiment_name = "mnist"
 experiment_json_file_name = "mnist-slower"
-experiment_checkpoint_path = "checkpoints/mnist-slower/checkpoints"
+experiment_checkpoint_path = "checkpoints/mnist_grokking/exp26/checkpoints"
 experiment_type = "mnist"
 step_distance = 10_000
 total_steps = 100_000
-num_kernel_samples = 256
-num_analysis_training_samples = 256
-num_analysis_test_samples = 256
+num_kernel_samples = 512
+num_analysis_training_samples = 64
+num_analysis_test_samples = 512
 
 
 kernel_batch_size = 32
