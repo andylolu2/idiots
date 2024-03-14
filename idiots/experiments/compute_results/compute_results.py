@@ -20,11 +20,12 @@ from sklearn.gaussian_process.kernels import (
 from sklearn.metrics import accuracy_score
 from sklearn.model_selection import train_test_split
 from sklearn.svm import SVC
+from tqdm import trange
 
 from idiots.dataset.dataloader import DataLoader
-from idiots.experiments.classification.training import restore as mnist_restore, init_state_and_ds
-from idiots.experiments.classification.config import get_config
-from idiots.experiments.grokking.training import TrainState, eval_step
+from idiots.experiments.classification.training import init_state_and_ds
+from idiots.experiments.classification.training import restore as mnist_restore
+from idiots.experiments.grokking.training import eval_step
 from idiots.experiments.grokking.training import restore as algorithmic_restore
 from idiots.utils import metrics
 
@@ -108,7 +109,7 @@ def compute_dots(kernel_trace_axes):
     s_dist = S / jnp.sum(S)
     dots_3 = jnp.exp(-jnp.sum(s_dist * jnp.log(s_dist)))
 
-    return dots_1, dots_2, dots_3
+    return dots_1, dots_2, dots_3, S
 
 
 # Given the a custom kernel and training/test data, compute the accuracy of an SVM
@@ -246,7 +247,7 @@ def compute_results(logs_base_path, experiments, add_kernel, kernel_batch_size=3
         )
 
         all_metrics = []
-        for step in range(0, total_steps + 1, step_distance):
+        for step in trange(0, total_steps + 1, step_distance):
             if step > 0:
                 state = restore_manager.restore(
                     step, args=ocp.args.StandardRestore(state)
@@ -273,7 +274,7 @@ def compute_results(logs_base_path, experiments, add_kernel, kernel_batch_size=3
             kernel_X = ds_test["x"][:kernel_samples]
             kernel_Y = ds_test["y"][:kernel_samples]
             kernel = kernel_trace_axes_fn(kernel_X, None, state.params)
-            dots_1, dots_2, dots_3 = compute_dots(kernel)
+            dots_1, dots_2, dots_3, S = compute_dots(kernel)
             kernel_alignment = compute_kernel_alignment(kernel, kernel_Y)
 
             all_metrics.append(
@@ -289,13 +290,14 @@ def compute_results(logs_base_path, experiments, add_kernel, kernel_batch_size=3
                     "dots": dots_1.item(),
                     "dots_2": dots_2.item(),
                     "dots_3": dots_3.item(),
+                    "eigenvalues": S.tolist(),
                     "kernel_alignment": kernel_alignment.item(),
                     "kernel": kernel.tolist() if add_kernel else None,
                     "weight_norm": optax.global_norm(state.params).item(),
-                    "relative_weight_norm": optax.global_norm(state.params).item() / initial_weight_norm,
+                    "relative_weight_norm": optax.global_norm(state.params).item()
+                    / initial_weight_norm,
                 }
             )
-            print(json.dumps(all_metrics[-1], indent=2))
 
         out_file = Path(logs_base_path, "results", f"{experiment_json_file_name}.json")
         out_file.parent.mkdir(parents=True, exist_ok=True)
@@ -311,16 +313,16 @@ if __name__ == "__main__":
     logs_base_path = "/home/dc755/idiots/logs/"
 
     experiments = [
-        (
-            "mnist-gd-grokking-2",
-            "checkpoints/mnist_gd_grokking/exp55/checkpoints",
-            "mnist",
-            1_000,
-            100_000,
-            512,
-            64,
-            512,
-        ),
+        # (
+        #     "mnist-gd-grokking-2",
+        #     "checkpoints/mnist_gd_grokking/exp55/checkpoints",
+        #     "mnist",
+        #     1_000,
+        #     100_000,
+        #     512,
+        #     64,
+        #     512,
+        # ),
         # (
         #     "mnist-adamw",
         #     "checkpoints/mnist/mnist_adamw/checkpoints",
@@ -331,16 +333,16 @@ if __name__ == "__main__":
         #     64,
         #     256,
         # ),
-        (
-            "mnist-grokking-slower-2",
-            "checkpoints/mnist_grokking_slower/exp26/checkpoints",
-            "mnist",
-            1_000,
-            100_000,
-            512,
-            64,
-            512,
-        ),
+        # (
+        #     "mnist-grokking-slower-2",
+        #     "checkpoints/mnist_grokking_slower/exp26/checkpoints",
+        #     "mnist",
+        #     1_000,
+        #     100_000,
+        #     512,
+        #     64,
+        #     512,
+        # ),
     ]
 
     compute_results(
