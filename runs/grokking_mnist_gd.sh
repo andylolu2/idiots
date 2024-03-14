@@ -13,6 +13,6 @@ python idiots/experiments/classification/main.py \
     --config.model.normalize_inputs=True \
     --config.loss_variant=mse \
     --config.opt.name=sgd \
-    --config.opt.lr=1e-2 \
+    --config.opt.lr=1e-3 \
     --config.opt.warmup_steps=0 \
     --config.opt.weight_decay=5e-3
