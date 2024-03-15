@@ -4,9 +4,9 @@ from idiots.experiments.gradient_flow.configs.base import get_config as base_con
 def get_config():
     config = base_config()
 
-    config.weight_decay = 0.001
-    config.T = 5000
-    config.save_every = 50
+    config.weight_decay = 4e-3
+    config.T = 1000
+    config.save_every = 10
 
     config.dataset = dict(
         name="mnist",
@@ -16,11 +16,11 @@ def get_config():
 
     config.model = dict(
         name="ImageMLP",
-        hidden=128,
-        n_layers=1,
+        hidden=256,
+        n_layers=2,
         init_scale=8,
     )
 
-    config.ode.dt0 = 5e-5
+    config.ode.dt0 = 1e-5
 
     return config

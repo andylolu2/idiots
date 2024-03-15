@@ -7,18 +7,15 @@ def get_config():
     config.log_dir = "logs/checkpoints/gradient_flow"
 
     config.seed = 0
-    config.weight_decay = 0.004
     config.T = 1000
     config.save_every = 10
+    config.loss_variant = "mse"
+    config.fixed_weight_norm = False
+    config.weight_decay = 0.0
 
     config.dataset = dict()
 
-    config.model = dict(
-        name="ImageMLP",
-        hidden=128,
-        n_layers=1,
-        init_scale=8,
-    )
+    config.model = dict()
 
     config.ode = dict(
         rtol=1e-5,

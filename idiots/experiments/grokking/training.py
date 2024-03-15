@@ -33,8 +33,10 @@ class TrainState(train_state.TrainState):
     ...
 
 
-@partial(jax.jit, static_argnums=2)
-def train_step(state: TrainState, batch, loss_variant: str) -> tuple[TrainState, dict]:
+@partial(jax.jit, static_argnums=(2, 3))
+def train_step(
+    state: TrainState, batch, loss_variant: str, fixed_weight_norm: bool = False
+) -> tuple[TrainState, dict]:
     def forward(params, x, y):
         y_pred = state.apply_fn(params, x)
         losses = loss_fn(y_pred, y, variant=loss_variant)
@@ -47,6 +49,12 @@ def train_step(state: TrainState, batch, loss_variant: str) -> tuple[TrainState,
     acc = jnp.argmax(y_pred, axis=-1) == batch["y"]
     updates, new_opt_state = state.tx.update(grads, state.opt_state, state.params)
     new_params = optax.apply_updates(state.params, updates)
+
+    if fixed_weight_norm:
+        old_norm = optax.global_norm(state.params)
+        new_norm = optax.global_norm(new_params)
+        new_params = jax.tree_map(lambda p: p * (old_norm / new_norm), new_params)
+
     new_state = state.replace(
         step=state.step + 1,
         params=new_params,

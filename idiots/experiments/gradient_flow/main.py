@@ -1,7 +1,6 @@
 import jax
 import jax.numpy as jnp
 import optax
-import orbax.checkpoint as ocp
 from absl import app, flags, logging
 from diffrax import (
     ODETerm,
@@ -14,6 +13,7 @@ from diffrax import (
 from ml_collections import config_flags
 
 from idiots.experiments.gradient_flow.init import init
+from idiots.experiments.grokking.training import loss_fn
 from idiots.utils import num_params
 
 FLAGS = flags.FLAGS
@@ -28,20 +28,31 @@ def main(_):
     logging.info("Number of parameters: %d", num_params(params))
 
     xs_train, ys_train = ds_train["x"], ds_train["y"]
-    ys_train = jax.nn.one_hot(ys_train, ds_train.features["y"].num_classes)
     xs_train, ys_train = jax.device_put(xs_train), jax.device_put(ys_train)
 
     def update_fn(params):
-        def loss_fn(params):
+        def forward(params):
             ys_pred = apply_fn(params, xs_train)
-            return optax.l2_loss(ys_pred, ys_train).mean()
+            return loss_fn(ys_pred, ys_train, variant=config.loss_variant).mean()
 
-        grad = jax.grad(loss_fn)(params)
+        grad = jax.grad(forward)(params)
         update = jax.tree_map(
             lambda g, p: -(g + config.weight_decay * p),
             grad,
             params,
         )
+
+        if config.fixed_weight_norm:
+            # u_fixed = u - (u . p^hat) p^hat
+            p_norm = optax.global_norm(params)
+            p_hat = jax.tree_map(lambda p: p / p_norm, params)
+            u_dot_p_hat = sum(
+                jax.tree_util.tree_leaves(jax.tree_map(jnp.vdot, update, p_hat))
+            )
+            update = jax.tree_map(
+                lambda u, p_hat: u - u_dot_p_hat * p_hat, update, p_hat
+            )
+
         return update
 
     term = ODETerm(lambda t, ps, args: update_fn(ps))

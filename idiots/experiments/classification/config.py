@@ -18,9 +18,10 @@ def get_config():
     config.test_size = 5_000
     config.train_batch_size = 128
     config.test_batch_size = 128
+    config.fixed_weight_norm = False
 
     config.dots_sample_size = 128
-    config.dots_batch_size = 64
+    config.dots_batch_size = 128
 
     config.model = dict(
         d_model=256,

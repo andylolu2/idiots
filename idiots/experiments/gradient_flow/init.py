@@ -17,7 +17,8 @@ def load_model(name: str, **kwargs):
         return ImageMLP(
             hidden=kwargs["hidden"],
             n_layers=kwargs["n_layers"],
-            n_classes=kwargs["n_classes"],
+            out=kwargs["n_classes"],
+            normalize_inputs=True,
         )
     elif name == "EmbedMLP":
         return EmbedMLP(

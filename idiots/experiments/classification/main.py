@@ -48,7 +48,9 @@ def main(_):
     )
 
     while state.step < config.steps:
-        state, logs = train_step(state, next(train_iter), config.loss_variant)
+        state, logs = train_step(
+            state, next(train_iter), config.loss_variant, config.fixed_weight_norm
+        )
         assert isinstance(state, TrainState)  # For better typing
         metrics.log(**logs)
 

@@ -12,7 +12,6 @@ import orbax.checkpoint as ocp
 from einops import rearrange
 from sklearn.gaussian_process import GaussianProcessRegressor
 from sklearn.gaussian_process.kernels import (
-    RBF,
     Kernel,
     NormalizedKernelMixin,
     StationaryKernelMixin,
@@ -23,9 +22,9 @@ from sklearn.svm import SVC
 from tqdm import trange
 
 from idiots.dataset.dataloader import DataLoader
-from idiots.experiments.classification.training import init_state_and_ds
 from idiots.experiments.classification.training import restore as mnist_restore
-from idiots.experiments.grokking.training import eval_step
+from idiots.experiments.gradient_flow.init import restore as gradient_flow_restore
+from idiots.experiments.grokking.training import loss_fn
 from idiots.experiments.grokking.training import restore as algorithmic_restore
 from idiots.utils import metrics
 
@@ -34,12 +33,19 @@ os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
 warnings.filterwarnings("ignore")
 
 
-def eval_checkpoint(state, config, train_loader, test_loader):
+def eval_checkpoint(apply_fn, params, config, train_loader, test_loader):
     """Compute training/test accuracy/loss for each timestep"""
+
+    @jax.jit
+    def eval_step(batch) -> dict:
+        y_pred = apply_fn(params, batch["x"])
+        losses = loss_fn(y_pred, batch["y"], variant=config.loss_variant)
+        acc = jnp.argmax(y_pred, axis=-1) == batch["y"]
+        return {"eval_loss": losses, "eval_accuracy": acc}
 
     def eval_loss_acc(loader):
         for batch in loader:
-            logs = eval_step(state, batch, config.loss_variant)
+            logs = eval_step(batch)
             metrics.log(**logs)
         [losses, accuracies] = metrics.collect("eval_loss", "eval_accuracy")
         loss = jnp.concatenate(losses).mean().item()
@@ -66,15 +72,15 @@ def generate_analysis_dataset(
         X_test, Y_test, train_size=num_analysis_test_samples, stratify=Y_test
     )
 
-    if experiment_type == "mnist":
+    if experiment_type == "mnist" or experiment_type == "gradient_flow_mnist":
         analysis_X_train = rearrange(analysis_X_train, "b h w -> b (h w)")
         analysis_X_test = rearrange(analysis_X_test, "b h w -> b (h w)")
 
     return (analysis_X_train, analysis_Y_train, analysis_X_test, analysis_Y_test)
 
 
-# Return a batched kernel function where trace_axes=() [for calculating DOTS]
 def compute_kernel_trace_axes_fn(transformer_state_apply_fn, batch_size):
+    # Return a batched kernel function where trace_axes=() [for calculating DOTS]
     kernel_fn_trace_axes = nt.empirical_ntk_fn(
         transformer_state_apply_fn,
         vmap_axes=0,
@@ -84,8 +90,8 @@ def compute_kernel_trace_axes_fn(transformer_state_apply_fn, batch_size):
     return nt.batch(kernel_fn_trace_axes, batch_size=batch_size)
 
 
-# Return a batched kernel function where trace_axes is not defined [for computing everything other than DOTS]
 def compute_kernel_fn(transformer_state_apply_fn, batch_size):
+    # Return a batched kernel function where trace_axes is not defined [for computing everything other than DOTS]
     kernel_fn = nt.empirical_ntk_fn(
         transformer_state_apply_fn,
         vmap_axes=0,
@@ -153,8 +159,10 @@ def compute_gp_accuracy(
             else:
                 return kernel
 
-    custom_gp_kernel = CustomKernel()  # RBF(length_scale=1e3)
-    gaussian_process_classifier = GaussianProcessRegressor(kernel=custom_gp_kernel)
+    custom_gp_kernel = CustomKernel()
+    gaussian_process_classifier = GaussianProcessRegressor(
+        kernel=custom_gp_kernel, alpha=1e-8
+    )
     gaussian_process_classifier.fit(analysis_X_train, analysis_Y_train_one_hot)
 
     predictions = gaussian_process_classifier.predict(analysis_X_test).argmax(axis=-1)
@@ -176,9 +184,47 @@ def compute_kernel_alignment(kernel, analysis_Y_test):
     return kernel_alignment
 
 
-def compute_results(logs_base_path, experiments, add_kernel, kernel_batch_size=32):
+def restore_checkpoint(checkpoint_dir: Path, experiment_type: str):
+    if experiment_type == "algorithmic":
+        mngr, config, state, ds_train, ds_test = algorithmic_restore(checkpoint_dir, 0)
+
+        def get_params(step: int):
+            if step == 0:
+                return state.params
+            else:
+                return mngr.restore(step, args=ocp.args.StandardRestore(state)).params
+
+        return config, state.apply_fn, get_params, ds_train, ds_test
+
+    elif experiment_type == "mnist":
+        mngr, config, state, ds_train, ds_test = mnist_restore(checkpoint_dir, 0)
+
+        def get_params(step: int):
+            if step == 0:
+                return state.params
+            else:
+                return mngr.restore(step, args=ocp.args.StandardRestore(state)).params
+
+        return config, state.apply_fn, get_params, ds_train, ds_test
+
+    elif experiment_type.startswith("gradient_flow_"):
+        apply_fn, init_params, ds_train, ds_test, mngr, config = gradient_flow_restore(
+            checkpoint_dir
+        )
+
+        def get_params(step: int):
+            if step == 0:
+                return init_params
+            else:
+                return mngr.restore(step)
+
+        return config, apply_fn, get_params, ds_train, ds_test
+    else:
+        raise ValueError(f"Experiment type {experiment_type} not valid.")
+
+
+def compute_results(experiments, add_kernel, kernel_batch_size=32):
     """
-    logs_base_path: e.g. "/home/dm894/idiots/logs/"
     experiments: (
         experiment_json_file_name: e.g. "mnist-100" to save file as "mnist-100.json",
         experiment_checkpoint_path: e.g. "checkpoints/mnist-100/checkpoints",
@@ -204,35 +250,22 @@ def compute_results(logs_base_path, experiments, add_kernel, kernel_batch_size=3
     ) in experiments:
         print(f"Experiment: {experiment_json_file_name}")
 
-        experiment_checkpoint_path = Path(logs_base_path, experiment_checkpoint_path)
-
-        if experiment_type == "algorithmic":
-            restore_fn = algorithmic_restore
-        elif experiment_type == "mnist":
-            restore_fn = mnist_restore
-        else:
-            raise ValueError(f"Experiment type {experiment_type} not valid.")
-
-        restore_manager, config, state, ds_train, ds_test = restore_fn(
-            experiment_checkpoint_path, 0
+        config, apply_fn, get_params, ds_train, ds_test = restore_checkpoint(
+            Path(experiment_checkpoint_path), experiment_type
         )
         if len(ds_train) > len(ds_test):
             ds_train = ds_train.select(range(len(ds_test)))
+        train_loader = DataLoader(ds_train, 256)
+        test_loader = DataLoader(ds_test, 256)
 
-        initial_state, _, _ = init_state_and_ds(config)
-        initial_params = initial_state.params
-        initial_weight_norm = optax.global_norm(initial_params).item()
+        init_weight_norm = optax.global_norm(get_params(0)).item()
 
-        train_loader = DataLoader(ds_train, config.train_batch_size)
-        test_loader = DataLoader(ds_test, config.test_batch_size)
-        kernel_fn = compute_kernel_fn(state.apply_fn, kernel_batch_size)
-        kernel_trace_axes_fn = compute_kernel_trace_axes_fn(
-            state.apply_fn, kernel_batch_size
-        )
+        kernel_fn = compute_kernel_fn(apply_fn, kernel_batch_size)
+        kernel_trace_axes_fn = compute_kernel_trace_axes_fn(apply_fn, kernel_batch_size)
 
-        X_test, Y_test = jnp.array(ds_test["x"]), jnp.array(ds_test["y"])
         # kernel dataset is used for computing the kernels used in DOTS and kernel alignment
         # analysis datasets are used for the remaining analysis: SVM, GP
+        X_test, Y_test = jnp.array(ds_test["x"]), jnp.array(ds_test["y"])
         (
             analysis_X_train,
             analysis_Y_train,
@@ -248,22 +281,19 @@ def compute_results(logs_base_path, experiments, add_kernel, kernel_batch_size=3
 
         all_metrics = []
         for step in trange(0, total_steps + 1, step_distance):
-            if step > 0:
-                state = restore_manager.restore(
-                    step, args=ocp.args.StandardRestore(state)
-                )
+            params = get_params(step)
             train_loss, train_acc, test_loss, test_acc = eval_checkpoint(
-                state, config, train_loader, test_loader
+                apply_fn, params, config, train_loader, test_loader
             )
             svm_train_acc, svm_test_acc = compute_svm_accuracy(
-                lambda x1, x2: kernel_fn(x1, x2, state.params),
+                lambda x1, x2: kernel_fn(x1, x2, params),
                 analysis_X_train,
                 analysis_Y_train,
                 analysis_X_test,
                 analysis_Y_test,
             )
             gp_acc = compute_gp_accuracy(
-                lambda x1, x2: kernel_fn(x1, x2, state.params),
+                lambda x1, x2: kernel_fn(x1, x2, params),
                 analysis_X_train,
                 analysis_Y_train,
                 analysis_X_test,
@@ -273,7 +303,7 @@ def compute_results(logs_base_path, experiments, add_kernel, kernel_batch_size=3
 
             kernel_X = ds_test["x"][:kernel_samples]
             kernel_Y = ds_test["y"][:kernel_samples]
-            kernel = kernel_trace_axes_fn(kernel_X, None, state.params)
+            kernel = kernel_trace_axes_fn(kernel_X, None, params)
             dots_1, dots_2, dots_3, S = compute_dots(kernel)
             kernel_alignment = compute_kernel_alignment(kernel, kernel_Y)
 
@@ -293,9 +323,9 @@ def compute_results(logs_base_path, experiments, add_kernel, kernel_batch_size=3
                     "eigenvalues": S.tolist(),
                     "kernel_alignment": kernel_alignment.item(),
                     "kernel": kernel.tolist() if add_kernel else None,
-                    "weight_norm": optax.global_norm(state.params).item(),
-                    "relative_weight_norm": optax.global_norm(state.params).item()
-                    / initial_weight_norm,
+                    "weight_norm": optax.global_norm(params).item(),
+                    "relative_weight_norm": optax.global_norm(params).item()
+                    / init_weight_norm,
                 }
             )
 
@@ -308,14 +338,14 @@ def compute_results(logs_base_path, experiments, add_kernel, kernel_batch_size=3
 
 
 if __name__ == "__main__":
-    # logs_base_path = "/home/dm894/idiots/logs/"
-    logs_base_path = "logs"
-    logs_base_path = "/home/dc755/idiots/logs/"
+    # logs_base_path = Path("/home/dm894/idiots/logs/")
+    logs_base_path = Path("logs")
+    # logs_base_path = Path("/home/dc755/idiots/logs/")
 
     experiments = [
         # (
         #     "mnist-gd-grokking-2",
-        #     "checkpoints/mnist_gd_grokking/exp55/checkpoints",
+        #     logs_base_path / "checkpoints/mnist_gd_grokking/exp55/checkpoints",
         #     "mnist",
         #     1_000,
         #     100_000,
@@ -325,7 +355,7 @@ if __name__ == "__main__":
         # ),
         # (
         #     "mnist-adamw",
-        #     "checkpoints/mnist/mnist_adamw/checkpoints",
+        #     logs_base_path / "checkpoints/mnist/mnist_adamw/checkpoints",
         #     "mnist",
         #     1_000,
         #     50_000,
@@ -335,7 +365,7 @@ if __name__ == "__main__":
         # ),
         # (
         #     "mnist-grokking-slower-2",
-        #     "checkpoints/mnist_grokking_slower/exp26/checkpoints",
+        #     logs_base_path / "checkpoints/mnist_grokking_slower/exp26/checkpoints",
         #     "mnist",
         #     1_000,
         #     100_000,
@@ -343,8 +373,90 @@ if __name__ == "__main__":
         #     64,
         #     512,
         # ),
+        # (
+        #     "mnist-gf",
+        #     logs_base_path / "checkpoints/gradient_flow/exp34/checkpoints",
+        #     "gradient_flow_mnist",
+        #     50,
+        #     1000,
+        #     512,
+        #     64,
+        #     512,
+        # ),
+        # (
+        #     "mnist-adamw",
+        #     logs_base_path / "checkpoints/mnist/exp66/checkpoints",
+        #     "mnist",
+        #     5000,
+        #     100_000,
+        #     512,
+        #     64,
+        #     512,
+        # ),
+        # (
+        #     "mnist-sgd",
+        #     logs_base_path / "checkpoints/mnist/exp70/checkpoints",
+        #     "mnist",
+        #     5000,
+        #     100_000,
+        #     512,
+        #     64,
+        #     512,
+        # ),
+        # (
+        #     "mnist-sgd-16",
+        #     logs_base_path / "checkpoints/mnist/exp72/checkpoints",
+        #     "mnist",
+        #     5000,
+        #     100_000,
+        #     512,
+        #     64,
+        #     512,
+        # ),
+        # (
+        #     "mnist-sgd-8",
+        #     logs_base_path / "checkpoints/mnist/exp71/checkpoints",
+        #     "mnist",
+        #     5000,
+        #     100_000,
+        #     512,
+        #     64,
+        #     512,
+        # ),
+        # (
+        #     "mnist-adamw-64",
+        #     logs_base_path / "checkpoints/mnist/exp75/checkpoints",
+        #     "mnist",
+        #     5000,
+        #     100_000,
+        #     512,
+        #     64,
+        #     512,
+        # ),
+        # (
+        #     "mnist-adamw-256",
+        #     logs_base_path / "checkpoints/mnist/exp76/checkpoints",
+        #     "mnist",
+        #     5000,
+        #     100_000,
+        #     512,
+        #     64,
+        #     512,
+        # ),
     ]
 
-    compute_results(
-        logs_base_path, experiments, add_kernel=False, kernel_batch_size=256
-    )
+    # for exp in [15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 26, 27]:
+    #     experiments.append(
+    #         (
+    #             f"mnist-fixed-norm-{exp}",
+    #             logs_base_path / f"checkpoints/mnist_fixed_norm/exp{exp}/checkpoints",
+    #             "mnist",
+    #             10_000,
+    #             10_000,
+    #             512,
+    #             64,
+    #             512,
+    #         ),
+    #     )
+
+    compute_results(experiments, add_kernel=False, kernel_batch_size=256)
