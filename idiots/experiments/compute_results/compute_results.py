@@ -76,6 +76,10 @@ def generate_analysis_dataset(
         analysis_X_train = rearrange(analysis_X_train, "b h w -> b (h w)")
         analysis_X_test = rearrange(analysis_X_test, "b h w -> b (h w)")
 
+    if experiment_type == "cifar":
+        analysis_X_train = rearrange(analysis_X_train, "b h w c -> b (h w c)")
+        analysis_X_test = rearrange(analysis_X_test, "b h w c -> b (h w c)")
+
     return (analysis_X_train, analysis_Y_train, analysis_X_test, analysis_Y_test)
 
 
@@ -196,7 +200,7 @@ def restore_checkpoint(checkpoint_dir: Path, experiment_type: str):
 
         return config, state.apply_fn, get_params, ds_train, ds_test
 
-    elif experiment_type == "mnist":
+    elif experiment_type == "mnist" or experiment_type == "cifar":
         mngr, config, state, ds_train, ds_test = mnist_restore(checkpoint_dir, 0)
 
         def get_params(step: int):
@@ -292,14 +296,14 @@ def compute_results(experiments, add_kernel, kernel_batch_size=32):
                 analysis_X_test,
                 analysis_Y_test,
             )
-            gp_acc = compute_gp_accuracy(
-                lambda x1, x2: kernel_fn(x1, x2, params),
-                analysis_X_train,
-                analysis_Y_train,
-                analysis_X_test,
-                analysis_Y_test,
-                ds_train.features["y"].num_classes,
-            )
+            # gp_acc = compute_gp_accuracy(
+            #     lambda x1, x2: kernel_fn(x1, x2, params),
+            #     analysis_X_train,
+            #     analysis_Y_train,
+            #     analysis_X_test,
+            #     analysis_Y_test,
+            #     ds_train.features["y"].num_classes,
+            # )
 
             kernel_X = ds_test["x"][:kernel_samples]
             kernel_Y = ds_test["y"][:kernel_samples]
@@ -316,7 +320,7 @@ def compute_results(experiments, add_kernel, kernel_batch_size=32):
                     "test_acc": test_acc,
                     "svm_train_accuracy": svm_train_acc,
                     "svm_accuracy": svm_test_acc,
-                    "gp_accuracy": gp_acc,
+                    # "gp_accuracy": gp_acc,
                     "dots": dots_1.item(),
                     "dots_2": dots_2.item(),
                     "dots_3": dots_3.item(),
@@ -339,10 +343,21 @@ def compute_results(experiments, add_kernel, kernel_batch_size=32):
 
 if __name__ == "__main__":
     # logs_base_path = Path("/home/dm894/idiots/logs/")
-    logs_base_path = Path("logs")
+    # logs_base_path = Path("logs")
+    logs_base_path = Path("../../../logs")
     # logs_base_path = Path("/home/dc755/idiots/logs/")
 
     experiments = [
+        (
+            "cifar-10",
+            logs_base_path / "checkpoints/mnist/exp52/checkpoints",
+            "cifar",
+            1_000,
+            100_000,
+            512,
+            128, 
+            512,
+        )
         # (
         #     "mnist-gd-grokking-2",
         #     logs_base_path / "checkpoints/mnist_gd_grokking/exp55/checkpoints",
