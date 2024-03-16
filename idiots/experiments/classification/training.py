@@ -8,6 +8,7 @@ from ml_collections import ConfigDict
 from tensorboardX import SummaryWriter
 
 from idiots.dataset.image_classification import mnist_splits
+from idiots.dataset.cifar_classification import cifar10_splits
 from idiots.experiments.classification.config import get_config
 from idiots.experiments.classification.model import ImageMLP
 from idiots.experiments.grokking.training import TrainState
@@ -15,7 +16,8 @@ from idiots.utils import get_optimizer, next_dir
 
 
 def init_state_and_ds(config):
-    ds_train, ds_test = mnist_splits(config.train_size, config.test_size, config.seed)
+    # ds_train, ds_test = mnist_splits(config.train_size, config.test_size, config.seed)
+    ds_train, ds_test = cifar10_splits(config.train_size, config.test_size, config.seed)
     model = ImageMLP(
         hidden=config.model.d_model,
         n_layers=config.model.n_layers,
