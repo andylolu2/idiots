@@ -60,9 +60,11 @@ def restore(checkpoint_dir: Path):
     checkpoint_dir = checkpoint_dir.absolute().resolve()
     mngr = ocp.CheckpointManager(
         checkpoint_dir,
-        item_handlers=ocp.StandardCheckpointHandler(),
         options=ocp.CheckpointManagerOptions(
-            read_only=True, save_interval_steps=0, create=False
+            read_only=True,
+            save_interval_steps=0,
+            create=False,
+            enable_async_checkpointing=False,
         ),
     )
 

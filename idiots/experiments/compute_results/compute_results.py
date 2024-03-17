@@ -198,7 +198,7 @@ def restore_checkpoint(checkpoint_dir: Path, experiment_type: str):
             else:
                 return mngr.restore(step, args=ocp.args.StandardRestore(state)).params
 
-        return config, state.apply_fn, get_params, ds_train, ds_test
+        return config, state.apply_fn, get_params, ds_train, ds_test, mngr.all_steps()
 
     elif experiment_type == "mnist" or experiment_type == "cifar":
         mngr, config, state, ds_train, ds_test = mnist_restore(checkpoint_dir, 0)
@@ -209,7 +209,7 @@ def restore_checkpoint(checkpoint_dir: Path, experiment_type: str):
             else:
                 return mngr.restore(step, args=ocp.args.StandardRestore(state)).params
 
-        return config, state.apply_fn, get_params, ds_train, ds_test
+        return config, state.apply_fn, get_params, ds_train, ds_test, mngr.all_steps()
 
     elif experiment_type.startswith("gradient_flow_"):
         apply_fn, init_params, ds_train, ds_test, mngr, config = gradient_flow_restore(
@@ -220,9 +220,9 @@ def restore_checkpoint(checkpoint_dir: Path, experiment_type: str):
             if step == 0:
                 return init_params
             else:
-                return mngr.restore(step)
+                return mngr.restore(step, args=ocp.args.StandardRestore(init_params))
 
-        return config, apply_fn, get_params, ds_train, ds_test
+        return config, apply_fn, get_params, ds_train, ds_test, mngr.all_steps()
     else:
         raise ValueError(f"Experiment type {experiment_type} not valid.")
 
@@ -254,7 +254,7 @@ def compute_results(experiments, add_kernel, kernel_batch_size=32):
     ) in experiments:
         print(f"Experiment: {experiment_json_file_name}")
 
-        config, apply_fn, get_params, ds_train, ds_test = restore_checkpoint(
+        config, apply_fn, get_params, ds_train, ds_test, _ = restore_checkpoint(
             Path(experiment_checkpoint_path), experiment_type
         )
         if len(ds_train) > len(ds_test):
@@ -457,6 +457,66 @@ if __name__ == "__main__":
         #     512,
         #     64,
         #     512,
+        # ),
+        # (
+        #     "addition-gf",
+        #     logs_base_path / "checkpoints/gradient_flow/exp36/checkpoints",
+        #     "gradient_flow_algorithmic",
+        #     120_000,
+        #     1_500_000,
+        #     64,
+        #     256,
+        #     256,
+        # ),
+        # (
+        #     "addition-adamw",
+        #     logs_base_path / "checkpoints/grokking/exp100/checkpoints",
+        #     "algorithmic",
+        #     5_000,
+        #     50_000,
+        #     64,
+        #     256,
+        #     256,
+        # ),
+        # (
+        #     "division-adamw-mlp",
+        #     logs_base_path / "checkpoints/grokking/exp123/checkpoints",
+        #     "algorithmic",
+        #     2_000,
+        #     50_000,
+        #     128,
+        #     128,
+        #     256,
+        # ),
+        # (
+        #     "division-gf-mlp",
+        #     logs_base_path / "checkpoints/gradient_flow/exp37/checkpoints",
+        #     "gradient_flow_algorithmic",
+        #     90_000,
+        #     1_500_000,
+        #     64,
+        #     256,
+        #     256,
+        # ),
+        # (
+        #     "division-adamw-transformer",
+        #     logs_base_path / "checkpoints/grokking/exp127/checkpoints",
+        #     "algorithmic",
+        #     2_000,
+        #     50_000,
+        #     128,
+        #     128,
+        #     256,
+        # ),
+        # (
+        #     "division-adamw-mlp-1",
+        #     logs_base_path / "checkpoints/grokking/exp131/checkpoints",
+        #     "algorithmic",
+        #     2_000,
+        #     200_000,
+        #     128,
+        #     128,
+        #     256,
         # ),
     ]
 

@@ -15,6 +15,7 @@ orbax-checkpoint==0.5.3
 scikit-learn==1.4.1.post1
 gdown==5.1.0
 diffrax @ git+https://github.com/patrick-kidger/diffrax@89980d07338c0f26ed8174fb62102431ac63521b
+SciencePlots==2.1.1
 
 --find-links https://storage.googleapis.com/jax-releases/jax_cuda_releases.html
 jax==0.4.24

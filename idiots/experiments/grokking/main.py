@@ -43,13 +43,13 @@ def main(_):
 
     train_loader = DataLoader(
         ds_train,
-        config.train_batch_size,
+        min(config.train_batch_size, len(ds_train)),
         shuffle=True,
         infinite=True,
         drop_last=True,
         seed=config.seed,
     )
-    eval_loader = DataLoader(ds_test, config.test_batch_size)
+    eval_loader = DataLoader(ds_test, min(config.test_batch_size, len(ds_test)))
     train_iter = iter(train_loader)
     kernel_fn = nt.empirical_ntk_fn(
         state.apply_fn,

@@ -23,6 +23,7 @@ def get_config():
     config.dots_batch_size = 64
 
     config.model = dict(
+        name="transformer",
         d_model=64,
         n_layers=2,
         n_heads=2,

@@ -15,7 +15,7 @@ from tensorboardX import SummaryWriter
 
 from idiots.dataset.algorithmic import binary_op_splits
 from idiots.experiments.grokking.config import get_config
-from idiots.experiments.grokking.model import TransformerSingleOutput
+from idiots.experiments.grokking.model import EmbedMLP, TransformerSingleOutput
 from idiots.utils import get_optimizer, next_dir
 
 
@@ -107,29 +107,28 @@ def init_state_and_ds(config):
     ds_train, ds_test = binary_op_splits(
         config.task, config.train_percentage, config.seed
     )
-    model = TransformerSingleOutput(
-        d_model=config.model.d_model,
-        n_layers=config.model.n_layers,
-        n_heads=config.model.n_heads,
-        old_parameterisation=config.model.old_parameterisation,
-        vocab_size=ds_train.features["y"].num_classes,
-        max_len=ds_train.features["x"].length,
-    )
-    params = model.init(jax.random.PRNGKey(config.seed), ds_train["x"][:1])
-    tx = get_optimizer(**config.opt)
-    state = TrainState.create(apply_fn=model.apply, params=params, tx=tx)
+    state = init_state(config, ds_train["x"][:1], ds_train.features["y"].num_classes)
     return state, ds_train, ds_test
 
 
 def init_state(config, training_data_example, num_classes):
-    model = TransformerSingleOutput(
-        d_model=config.model.d_model,
-        n_layers=config.model.n_layers,
-        n_heads=config.model.n_heads,
-        old_parameterisation=config.model.old_parameterisation,
-        vocab_size=num_classes,
-        max_len=training_data_example.shape[1],
-    )
+    if config.model.name == "transformer":
+        model = TransformerSingleOutput(
+            d_model=config.model.d_model,
+            n_layers=config.model.n_layers,
+            n_heads=config.model.n_heads,
+            old_parameterisation=config.model.old_parameterisation,
+            vocab_size=num_classes,
+            max_len=training_data_example.shape[1],
+        )
+    elif config.model.name == "mlp":
+        model = EmbedMLP(
+            hidden=config.model.d_model,
+            n_layers=config.model.n_layers,
+            n_classes=num_classes,
+        )
+    else:
+        raise ValueError(f"Unknown model name: {config.model.name}")
     params = model.init(jax.random.PRNGKey(config.seed), training_data_example)
     tx = get_optimizer(**config.opt)
     state = TrainState.create(apply_fn=model.apply, params=params, tx=tx)
@@ -152,7 +151,10 @@ def restore(
     mngr = ocp.CheckpointManager(
         checkpoint_dir,
         options=ocp.CheckpointManagerOptions(
-            read_only=True, save_interval_steps=0, create=False
+            read_only=True,
+            save_interval_steps=0,
+            create=False,
+            enable_async_checkpointing=False,
         ),
     )
 
