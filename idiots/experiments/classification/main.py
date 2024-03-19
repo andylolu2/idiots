@@ -1,7 +1,9 @@
 import random
 
+import jax
 import jax.numpy as jnp
 import neural_tangents as nt
+import optax
 import orbax.checkpoint as ocp
 from absl import app, flags, logging
 from datasets import Dataset
@@ -46,13 +48,17 @@ def main(_):
         vmap_axes=0,
         implementation=nt.NtkImplementation.STRUCTURED_DERIVATIVES,
     )
+    norm = optax.global_norm(state.params)
 
     while state.step < config.steps:
-        state, logs = train_step(
-            state, next(train_iter), config.loss_variant, config.fixed_weight_norm
-        )
+        state, logs = train_step(state, next(train_iter), config.loss_variant)
         assert isinstance(state, TrainState)  # For better typing
         metrics.log(**logs)
+
+        if config.fixed_weight_norm:
+            new_norm = optax.global_norm(state.params)
+            new_params = jax.tree_map(lambda p: p * (norm / new_norm), state.params)
+            state = state.replace(params=new_params)
 
         if state.step % config.log_every == 0 and config.log_every > 0:
             [

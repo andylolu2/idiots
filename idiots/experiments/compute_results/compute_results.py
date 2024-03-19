@@ -28,8 +28,6 @@ from idiots.experiments.grokking.training import loss_fn
 from idiots.experiments.grokking.training import restore as algorithmic_restore
 from idiots.utils import metrics
 
-os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
-
 warnings.filterwarnings("ignore")
 
 
@@ -165,7 +163,7 @@ def compute_gp_accuracy(
 
     custom_gp_kernel = CustomKernel()
     gaussian_process_classifier = GaussianProcessRegressor(
-        kernel=custom_gp_kernel, alpha=1e-8
+        kernel=custom_gp_kernel, alpha=1e-7
     )
     gaussian_process_classifier.fit(analysis_X_train, analysis_Y_train_one_hot)
 
@@ -296,14 +294,14 @@ def compute_results(experiments, add_kernel, kernel_batch_size=32):
                 analysis_X_test,
                 analysis_Y_test,
             )
-            # gp_acc = compute_gp_accuracy(
-            #     lambda x1, x2: kernel_fn(x1, x2, params),
-            #     analysis_X_train,
-            #     analysis_Y_train,
-            #     analysis_X_test,
-            #     analysis_Y_test,
-            #     ds_train.features["y"].num_classes,
-            # )
+            gp_acc = compute_gp_accuracy(
+                lambda x1, x2: kernel_fn(x1, x2, params),
+                analysis_X_train,
+                analysis_Y_train,
+                analysis_X_test,
+                analysis_Y_test,
+                ds_train.features["y"].num_classes,
+            )
 
             kernel_X = ds_test["x"][:kernel_samples]
             kernel_Y = ds_test["y"][:kernel_samples]
@@ -320,7 +318,7 @@ def compute_results(experiments, add_kernel, kernel_batch_size=32):
                     "test_acc": test_acc,
                     "svm_train_accuracy": svm_train_acc,
                     "svm_accuracy": svm_test_acc,
-                    # "gp_accuracy": gp_acc,
+                    "gp_accuracy": gp_acc,
                     "dots": dots_1.item(),
                     "dots_2": dots_2.item(),
                     "dots_3": dots_3.item(),
@@ -342,22 +340,24 @@ def compute_results(experiments, add_kernel, kernel_batch_size=32):
 
 
 if __name__ == "__main__":
+    os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
+
     # logs_base_path = Path("/home/dm894/idiots/logs/")
-    # logs_base_path = Path("logs")
-    logs_base_path = Path("../../../logs")
+    logs_base_path = Path("logs")
+    # logs_base_path = Path("../../../logs")
     # logs_base_path = Path("/home/dc755/idiots/logs/")
 
     experiments = [
-        (
-            "cifar-10",
-            logs_base_path / "checkpoints/mnist/exp52/checkpoints",
-            "cifar",
-            1_000,
-            100_000,
-            512,
-            128, 
-            512,
-        )
+        # (
+        #     "cifar-10",
+        #     logs_base_path / "checkpoints/mnist/exp52/checkpoints",
+        #     "cifar",
+        #     1_000,
+        #     100_000,
+        #     512,
+        #     128,
+        #     512,
+        # ),
         # (
         #     "mnist-gd-grokking-2",
         #     logs_base_path / "checkpoints/mnist_gd_grokking/exp55/checkpoints",
@@ -480,9 +480,9 @@ if __name__ == "__main__":
         # ),
         # (
         #     "division-adamw-mlp",
-        #     logs_base_path / "checkpoints/grokking/exp123/checkpoints",
+        #     logs_base_path / "checkpoints/grokking/exp131/checkpoints",
         #     "algorithmic",
-        #     2_000,
+        #     1_000,
         #     50_000,
         #     128,
         #     128,
@@ -490,19 +490,20 @@ if __name__ == "__main__":
         # ),
         # (
         #     "division-gf-mlp",
-        #     logs_base_path / "checkpoints/gradient_flow/exp37/checkpoints",
+        #     logs_base_path / "checkpoints/gradient_flow/exp39/checkpoints",
         #     "gradient_flow_algorithmic",
-        #     90_000,
-        #     1_500_000,
-        #     64,
-        #     256,
+        #     12_000,
+        #     600_000,
+        #     128,
+        #     128,
         #     256,
         # ),
         # (
         #     "division-adamw-transformer",
-        #     logs_base_path / "checkpoints/grokking/exp127/checkpoints",
+        #     logs_base_path
+        #     / "checkpoints/grokking/division_adamw_transformer/checkpoints",
         #     "algorithmic",
-        #     2_000,
+        #     1_000,
         #     50_000,
         #     128,
         #     128,
@@ -510,13 +511,24 @@ if __name__ == "__main__":
         # ),
         # (
         #     "division-adamw-mlp-1",
-        #     logs_base_path / "checkpoints/grokking/exp131/checkpoints",
+        #     logs_base_path
+        #     / "checkpoints/grokking/division_adamw_mlp_1_layer/checkpoints",
         #     "algorithmic",
-        #     2_000,
+        #     1_000,
         #     200_000,
         #     128,
         #     128,
         #     256,
+        # ),
+        # (
+        #     "mnist-adamw",
+        #     logs_base_path / "checkpoints/mnist/exp83/checkpoints",
+        #     "mnist",
+        #     1000,
+        #     100_000,
+        #     512,
+        #     64,
+        #     512,
         # ),
     ]
 
@@ -534,4 +546,18 @@ if __name__ == "__main__":
     #         ),
     #     )
 
-    compute_results(experiments, add_kernel=False, kernel_batch_size=256)
+    # for exp in range(43, 61):
+    #     experiments.append(
+    #         (
+    #             f"mnist-fixed-norm-gf-{exp}",
+    #             logs_base_path / f"checkpoints/gradient_flow/exp{exp}/checkpoints",
+    #             "gradient_flow_mnist",
+    #             10_000,
+    #             10_000,
+    #             512,
+    #             64,
+    #             512,
+    #         ),
+    #     )
+
+    compute_results(experiments, add_kernel=False, kernel_batch_size=64)

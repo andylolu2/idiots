@@ -4,9 +4,9 @@ from idiots.experiments.gradient_flow.configs.base import get_config as base_con
 def get_config():
     config = base_config()
 
-    config.weight_decay = 1e-5
-    config.T = 1_500_000
-    config.save_every = 15_000
+    config.weight_decay = 3e-5
+    config.T = 600_000
+    config.save_every = config.get_ref("T") // 100
 
     config.dataset = dict(
         name="binary_op",
