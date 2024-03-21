@@ -390,10 +390,10 @@ if __name__ == "__main__":
         # ),
         # (
         #     "mnist-gf",
-        #     logs_base_path / "checkpoints/gradient_flow/exp34/checkpoints",
+        #     logs_base_path / "checkpoints/gradient_flow/exp63/checkpoints",
         #     "gradient_flow_mnist",
-        #     50,
-        #     1000,
+        #     20,
+        #     2000,
         #     512,
         #     64,
         #     512,
@@ -547,13 +547,27 @@ if __name__ == "__main__":
     #     )
 
     # for exp in range(43, 61):
+    # experiments.append(
+    #     (
+    #         f"mnist-fixed-norm-gf-{exp}",
+    #         logs_base_path / f"checkpoints/gradient_flow/exp{exp}/checkpoints",
+    #         "gradient_flow_mnist",
+    #         1_000,
+    #         10_000,
+    #         512,
+    #         64,
+    #         512,
+    #     ),
+    # )
+
+    # for exp in range(65, 66):
     #     experiments.append(
     #         (
     #             f"mnist-fixed-norm-gf-{exp}",
     #             logs_base_path / f"checkpoints/gradient_flow/exp{exp}/checkpoints",
     #             "gradient_flow_mnist",
     #             10_000,
-    #             10_000,
+    #             100_000,
     #             512,
     #             64,
     #             512,

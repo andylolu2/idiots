@@ -6,7 +6,7 @@ def get_config():
 
     config.weight_decay = 4e-3
     config.T = 1000
-    config.save_every = 10
+    config.save_every = config.get_ref("T") // 100
 
     config.dataset = dict(
         name="mnist",
